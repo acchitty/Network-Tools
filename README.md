@@ -1,4 +1,4 @@
-# PCAP Analyzer v4 - Complete User Guide
+# PCAP Analyzer - Complete User Guide
 
 ## 🚀 QUICK START
 
