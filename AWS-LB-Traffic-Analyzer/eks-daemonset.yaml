@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traffic-analyzer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traffic-analyzer
+  namespace: traffic-analyzer
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/TrafficAnalyzerRole
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traffic-analyzer-config
+  namespace: traffic-analyzer
+data:
+  config.yaml: |
+    sample_rate: 10
+    timeout_threshold: 5
+    enable_cloudwatch: true
+    log_retention_days: 7
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: traffic-analyzer
+  namespace: traffic-analyzer
+  labels:
+    app: traffic-analyzer
+spec:
+  selector:
+    matchLabels:
+      app: traffic-analyzer
+  template:
+    metadata:
+      labels:
+        app: traffic-analyzer
+    spec:
+      serviceAccountName: traffic-analyzer
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: analyzer
+        image: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/traffic-analyzer:latest
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: ENABLE_CLOUDWATCH
+          value: "true"
+        - name: AWS_REGION
+          value: "us-east-1"
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: logs
+          mountPath: /logs
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: config
+        configMap:
+          name: traffic-analyzer-config
+      - name: logs
+        hostPath:
+          path: /var/log/traffic-analyzer
+          type: DirectoryOrCreate
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists

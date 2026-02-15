@@ -1,0 +1,14 @@
+[Unit]
+Description=AWS Load Balancer Traffic Analyzer
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/ec2-user/aws-lb-traffic-analyzer/aws-lb-traffic-analyzer.py -i eth0 -s 10
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
