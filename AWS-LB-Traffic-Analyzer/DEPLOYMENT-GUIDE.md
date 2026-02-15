@@ -14,6 +14,19 @@ Complete guide for deploying the traffic analyzer to EC2 instances behind AWS Lo
 
 ---
 
+## How It Works
+
+**Region Auto-Detection:**
+The analyzer automatically detects the AWS region using:
+1. EC2 instance metadata (primary method)
+2. AWS_REGION environment variable (fallback)
+3. AWS_DEFAULT_REGION environment variable (fallback)
+4. Defaults to us-east-1 if none found
+
+**Works in any AWS region without configuration changes!**
+
+---
+
 ## Prerequisites
 
 ### Required

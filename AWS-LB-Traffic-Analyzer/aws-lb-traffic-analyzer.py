@@ -33,16 +33,36 @@ class AWSLBTrafficAnalyzer:
         # AWS clients
         if self.enable_cloudwatch:
             try:
-                self.cloudwatch = boto3.client('cloudwatch', region_name='us-east-1')
-                self.logs = boto3.client('logs', region_name='us-east-1')
-                self.sns = boto3.client('sns', region_name='us-east-1') if sns_topic_arn else None
+                # Auto-detect region from EC2 metadata, environment, or boto3
+                region = None
+                
+                # Method 1: Try boto3 session (uses instance metadata automatically)
+                try:
+                    import boto3
+                    session = boto3.session.Session()
+                    region = session.region_name
+                except:
+                    pass
+                
+                # Method 2: Environment variables
+                if not region:
+                    import os
+                    region = os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION')
+                
+                # Method 3: Default fallback
+                if not region:
+                    region = 'us-east-1'
+                
+                self.cloudwatch = boto3.client('cloudwatch', region_name=region)
+                self.logs = boto3.client('logs', region_name=region)
+                self.sns = boto3.client('sns', region_name=region) if sns_topic_arn else None
                 
                 # Create CloudWatch Logs group and stream
                 self.log_group = '/aws/ec2/traffic-analyzer'
                 self.log_stream = f"instance-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                 self._setup_cloudwatch_logs()
                 
-                print("✓ CloudWatch integration enabled")
+                print(f"✓ CloudWatch integration enabled (region: {region})")
             except Exception as e:
                 print(f"Warning: AWS clients failed: {e}")
                 self.enable_cloudwatch = False

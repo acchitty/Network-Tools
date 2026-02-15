@@ -59,7 +59,10 @@ spec:
         - name: ENABLE_CLOUDWATCH
           value: "true"
         - name: AWS_REGION
-          value: "us-east-1"
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['eks.amazonaws.com/compute-type']
+        # Region will be auto-detected from EC2 metadata
         volumeMounts:
         - name: config
           mountPath: /config
