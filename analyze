@@ -1,0 +1,8 @@
+#!/bin/bash
+# PCAP Analyzer - Easy Launcher
+
+PYTHON="/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
+ANALYZER="$HOME/.pcap_tools/pcap_analyzer_v3.py"
+
+# Run the analyzer with the correct Python
+$PYTHON $ANALYZER "$@"
