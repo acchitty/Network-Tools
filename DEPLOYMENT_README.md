@@ -1,4 +1,4 @@
-# PCAP Analyzer v4 - Deployment Package
+# PCAP Analyzer - Deployment Package
 
 ## 📦 COMPLETE DEPLOYMENT PACKAGE
 
@@ -7,7 +7,7 @@ This package contains everything needed to deploy the PCAP Analyzer on any Mac s
 ## 📋 CONTENTS
 
 1. **install.sh** - Automated installation script
-2. **pcap_analyzer_v3.py** - Main analyzer (will be copied from ~/.pcap_tools/)
+2. **pcap_analyzer.py** - Main analyzer (will be copied from ~/.pcap_tools/)
 3. **analyze** - Command wrapper script
 4. **README.md** - Complete user guide
 5. **EXAMPLES.md** - Usage examples
@@ -83,9 +83,7 @@ For issues or questions, check:
 - Simple command interface
 - Optional visual features (stay fast when you don't need them)
 
-## 📄 LICENSE
-
-Free to use and modify.
+## Free to use and modify.
 
 ---
 

@@ -1,4 +1,4 @@
-# PCAP Analyzer v4 - Usage Examples
+# PCAP Analyzer - Usage Examples
 
 ## 🎯 COMMON USE CASES
 
