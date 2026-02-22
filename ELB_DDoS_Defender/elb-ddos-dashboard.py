@@ -115,18 +115,40 @@ def create_dashboard():
     config = load_config()
     metrics = load_metrics()
     
-    # Load balancers table
+    # Load balancers table with ENI info
     lb_table = Table(title="Monitored Load Balancers", box=box.ROUNDED, show_header=True)
     lb_table.add_column("#", style="cyan", width=5)
     lb_table.add_column("Name", style="green", width=25)
-    lb_table.add_column("Status", style="yellow", width=15)
+    lb_table.add_column("ENIs", style="yellow", width=15)
+    lb_table.add_column("IPs", style="magenta", width=30)
+    lb_table.add_column("Status", style="blue", width=12)
     
     lbs = config.get('load_balancers', [])
     if lbs:
         for i, lb in enumerate(lbs, 1):
-            lb_table.add_row(str(i), lb.get('name', 'Unknown'), "✓ Monitoring")
+            # Get ENI and IP info
+            try:
+                result = subprocess.run([
+                    "/usr/local/bin/aws", "elbv2", "describe-load-balancers",
+                    "--load-balancer-arns", lb['arn'],
+                    "--region", "us-east-1",
+                    "--query", "LoadBalancers[0].AvailabilityZones[*].[NetworkInterfaceId,LoadBalancerAddresses[0].IpAddress]",
+                    "--output", "json"
+                ], capture_output=True, text=True, timeout=5)
+                
+                if result.returncode == 0:
+                    import json
+                    data = json.loads(result.stdout)
+                    eni_count = len(data) if data else 0
+                    ips = [item[1] for item in data if item and len(item) > 1 and item[1]]
+                    ip_display = ", ".join(ips[:2]) + ("..." if len(ips) > 2 else "")
+                    lb_table.add_row(str(i), lb.get('name', 'Unknown'), f"{eni_count} ENIs", ip_display or "N/A", "✓ Active")
+                else:
+                    lb_table.add_row(str(i), lb.get('name', 'Unknown'), "?", "N/A", "✓ Active")
+            except:
+                lb_table.add_row(str(i), lb.get('name', 'Unknown'), "?", "N/A", "✓ Active")
     else:
-        lb_table.add_row("-", "No load balancers configured", "⚠ Pending")
+        lb_table.add_row("-", "No load balancers configured", "-", "-", "⚠ Pending")
     
     # Menu
     menu = Table(title="Menu Options", box=box.ROUNDED, show_header=True, padding=(0, 2))
@@ -134,10 +156,11 @@ def create_dashboard():
     menu.add_column("Action", style="white", width=40)
     
     menu.add_row("1", "Add Load Balancers to Monitor")
-    menu.add_row("2", "View Service Logs")
-    menu.add_row("3", "View Configuration")
-    menu.add_row("4", "Restart Service")
-    menu.add_row("5", "Setup VPC Traffic Mirroring")
+    menu.add_row("2", "View ENI Details for Load Balancers")
+    menu.add_row("3", "View Service Logs")
+    menu.add_row("4", "View Configuration")
+    menu.add_row("5", "Restart Service")
+    menu.add_row("6", "Setup VPC Traffic Mirroring")
     menu.add_row("R", "Refresh Dashboard")
     menu.add_row("Q", "Quit")
     
@@ -229,6 +252,64 @@ def add_load_balancers():
     console.print(f"\n[bold green]✓ Added {len(selected_lbs)} load balancer(s) and restarted service![/bold green]")
     time.sleep(3)
 
+def view_eni_details():
+    """Show detailed ENI information for all load balancers"""
+    console.clear()
+    console.print("[bold cyan]Load Balancer ENI Details[/bold cyan]\n")
+    
+    config = load_config()
+    lbs = config.get('load_balancers', [])
+    
+    if not lbs:
+        console.print("[yellow]No load balancers configured[/yellow]")
+        console.print("\n[dim]Press Enter to continue...[/dim]")
+        input()
+        return
+    
+    for lb in lbs:
+        console.print(f"\n[bold green]Load Balancer: {lb['name']}[/bold green]")
+        console.print(f"[dim]ARN: {lb['arn']}[/dim]\n")
+        
+        # Get detailed ENI info
+        result = subprocess.run([
+            "/usr/local/bin/aws", "elbv2", "describe-load-balancers",
+            "--load-balancer-arns", lb['arn'],
+            "--region", "us-east-1",
+            "--output", "json"
+        ], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+            azs = data['LoadBalancers'][0].get('AvailabilityZones', [])
+            
+            table = Table(box=box.SIMPLE, show_header=True)
+            table.add_column("AZ", style="cyan", width=15)
+            table.add_column("Subnet ID", style="yellow", width=25)
+            table.add_column("ENI ID", style="green", width=25)
+            table.add_column("IP Address", style="magenta", width=18)
+            
+            for az in azs:
+                az_name = az.get('ZoneName', 'N/A')
+                subnet_id = az.get('SubnetId', 'N/A')
+                
+                # Get ENI and IPs
+                addresses = az.get('LoadBalancerAddresses', [])
+                if addresses:
+                    for addr in addresses:
+                        eni_id = addr.get('AllocationId', 'N/A')
+                        ip = addr.get('IpAddress', 'N/A')
+                        table.add_row(az_name, subnet_id, eni_id, ip)
+                else:
+                    table.add_row(az_name, subnet_id, "N/A", "N/A")
+            
+            console.print(table)
+        else:
+            console.print("[red]Error fetching ENI details[/red]")
+    
+    console.print("\n[dim]Press Enter to continue...[/dim]")
+    input()
+
 def view_logs():
     console.clear()
     console.print("[bold cyan]Service Logs (Ctrl+C to exit)[/bold cyan]\n")
@@ -266,7 +347,7 @@ def main():
         console.print(layout)
         
         choice = Prompt.ask("[bold cyan]Select option[/bold cyan]", 
-                           choices=["1", "2", "3", "4", "5", "r", "R", "q", "Q"],
+                           choices=["1", "2", "3", "4", "5", "6", "r", "R", "q", "Q"],
                            default="r")
         
         if choice in ["q", "Q"]:
@@ -276,12 +357,14 @@ def main():
         elif choice == "1":
             add_load_balancers()
         elif choice == "2":
-            view_logs()
+            view_eni_details()
         elif choice == "3":
-            view_config()
+            view_logs()
         elif choice == "4":
-            restart_service()
+            view_config()
         elif choice == "5":
+            restart_service()
+        elif choice == "6":
             setup_traffic_mirroring()
         elif choice in ["r", "R"]:
             continue
