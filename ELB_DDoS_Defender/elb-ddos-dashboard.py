@@ -51,16 +51,101 @@ def show_menu():
     menu.add_column(style="bold cyan")
     menu.add_column(style="white")
     
-    menu.add_row("1", "View Real-time Logs")
-    menu.add_row("2", "Check Service Status")
-    menu.add_row("3", "View Configuration")
-    menu.add_row("4", "List All Load Balancers")
+    menu.add_row("1", "Add Load Balancers to Monitor")
+    menu.add_row("2", "View Real-time Logs")
+    menu.add_row("3", "Check Service Status")
+    menu.add_row("4", "View Configuration")
     menu.add_row("5", "Restart Service")
     menu.add_row("R", "Refresh Dashboard")
     menu.add_row("Q", "Quit")
     
     console.print(Panel(menu, title="[bold]Menu Options[/bold]", border_style="green"))
     console.print()
+
+def add_load_balancers():
+    console.clear()
+    console.print("[bold cyan]Discover and Add Load Balancers[/bold cyan]\n")
+    console.print("[yellow]Scanning for load balancers...[/yellow]\n")
+    
+    # Get all load balancers
+    result = subprocess.run(["/usr/local/bin/aws", "elbv2", "describe-load-balancers", 
+                            "--region", "us-east-1", "--output", "json"],
+                           capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        console.print("[red]Error: Could not fetch load balancers[/red]")
+        console.print("\n[dim]Press Enter to continue...[/dim]")
+        input()
+        return
+    
+    import json
+    data = json.loads(result.stdout)
+    lbs = data.get('LoadBalancers', [])
+    
+    if not lbs:
+        console.print("[yellow]No load balancers found in region[/yellow]")
+        console.print("\n[dim]Press Enter to continue...[/dim]")
+        input()
+        return
+    
+    # Show table of load balancers
+    table = Table(title="Available Load Balancers", box=box.ROUNDED, show_header=True)
+    table.add_column("#", style="cyan", width=5)
+    table.add_column("Name", style="green", width=20)
+    table.add_column("Type", style="yellow", width=15)
+    table.add_column("State", style="magenta", width=15)
+    
+    for i, lb in enumerate(lbs, 1):
+        lb_type = lb['Type'].upper()
+        table.add_row(str(i), lb['LoadBalancerName'], lb_type, lb['State']['Code'])
+    
+    console.print(table)
+    console.print()
+    
+    # Let user select
+    console.print("[bold]Enter numbers to add (comma-separated, e.g., 1,3,4) or 'all':[/bold]")
+    selection = input("> ").strip()
+    
+    if not selection:
+        return
+    
+    selected_lbs = []
+    if selection.lower() == 'all':
+        selected_lbs = lbs
+    else:
+        try:
+            indices = [int(x.strip()) - 1 for x in selection.split(',')]
+            selected_lbs = [lbs[i] for i in indices if 0 <= i < len(lbs)]
+        except:
+            console.print("[red]Invalid selection[/red]")
+            time.sleep(2)
+            return
+    
+    # Load current config
+    config = load_config()
+    if 'load_balancers' not in config:
+        config['load_balancers'] = []
+    
+    # Add selected LBs
+    for lb in selected_lbs:
+        # Check if already exists
+        exists = any(existing['arn'] == lb['LoadBalancerArn'] 
+                    for existing in config['load_balancers'])
+        if not exists:
+            config['load_balancers'].append({
+                'name': lb['LoadBalancerName'],
+                'arn': lb['LoadBalancerArn']
+            })
+    
+    # Save config
+    with open('/tmp/config.yaml', 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)
+    
+    subprocess.run(['sudo', 'mv', '/tmp/config.yaml', '/opt/elb-ddos-defender/config.yaml'])
+    subprocess.run(['sudo', 'systemctl', 'restart', 'elb-ddos-defender'])
+    
+    console.print(f"\n[bold green]✓ Added {len(selected_lbs)} load balancer(s) and restarted service![/bold green]")
+    time.sleep(3)
 
 def view_logs():
     console.clear()
@@ -113,13 +198,13 @@ def main():
             console.print("\n[bold yellow]Dashboard closed.[/bold yellow]\n")
             break
         elif choice == "1":
-            view_logs()
+            add_load_balancers()
         elif choice == "2":
-            check_status()
+            view_logs()
         elif choice == "3":
-            view_config()
+            check_status()
         elif choice == "4":
-            list_load_balancers()
+            view_config()
         elif choice == "5":
             restart_service()
         elif choice in ["r", "R"]:
