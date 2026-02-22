@@ -161,12 +161,21 @@ class MetricsWriter:
         """Continuously write metrics"""
         while self.running:
             try:
-                metrics = self.monitor.calculate_metrics()
+                # Get metrics snapshot
+                stats = self.monitor.stats
                 
-                # Convert set to list for JSON
-                metrics_json = metrics.copy()
-                metrics_json['unique_ips'] = len(metrics['unique_ips'])
-                metrics_json['timestamp'] = datetime.now().isoformat()
+                # Create safe copy
+                metrics_json = {
+                    'total_packets': stats['total_packets'],
+                    'total_bytes': stats['total_bytes'],
+                    'connections_per_sec': stats['connections_per_sec'],
+                    'unique_ips': len(stats['unique_ips']),
+                    'syn_packets': stats['syn_packets'],
+                    'udp_packets': stats['udp_packets'],
+                    'attacks_detected': stats['attacks_detected'][-10:],  # Last 10 only
+                    'packets_per_sec': stats.get('packets_per_sec', 0),
+                    'timestamp': datetime.now().isoformat()
+                }
                 
                 # Write to file
                 with open('/var/log/elb-ddos-defender/metrics.json', 'w') as f:
@@ -174,7 +183,7 @@ class MetricsWriter:
                 
                 time.sleep(1)
             except Exception as e:
-                logger.error(f"Metrics write error: {e}")
+                logger.debug(f"Metrics write error: {e}")
                 time.sleep(1)
     
     def stop(self):
