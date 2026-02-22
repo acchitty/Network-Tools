@@ -285,11 +285,13 @@ def view_eni_details():
             vpc_id = lb_data.get('VpcId')
             azs = lb_data.get('AvailabilityZones', [])
             
-            # Get ENIs for this LB by searching VPC
+            # Get ENIs for this LB by description pattern
+            # ENI description format: "ELB app/ALBTest/e3f3f7cdb19c225e"
+            search_pattern = f"ELB*{lb['name']}*"
+            
             eni_result = subprocess.run([
                 "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
-                "--filters", f"Name=vpc-id,Values={vpc_id}",
-                f"Name=description,Values=*{lb['name']}*",
+                "--filters", f"Name=description,Values={search_pattern}",
                 "--region", "us-east-1",
                 "--query", "NetworkInterfaces[*].[NetworkInterfaceId,PrivateIpAddress,SubnetId,AvailabilityZone]",
                 "--output", "json"
