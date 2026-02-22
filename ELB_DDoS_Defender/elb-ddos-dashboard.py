@@ -362,10 +362,176 @@ def setup_traffic_mirroring():
     console.clear()
     console.print("[bold cyan]VPC Traffic Mirroring Setup[/bold cyan]\n")
     console.print("[yellow]This will configure traffic mirroring from your ELBs to this instance[/yellow]\n")
+    
+    config = load_config()
+    lbs = config.get('load_balancers', [])
+    
+    if not lbs:
+        console.print("[red]No load balancers configured. Add them first (option 1)[/red]")
+        console.print("\n[dim]Press Enter to continue...[/dim]")
+        input()
+        return
+    
+    console.print(f"[green]Found {len(lbs)} load balancer(s) to mirror[/green]\n")
     console.print("[dim]Press Enter to continue or Ctrl+C to cancel...[/dim]")
     input()
-    console.print("\n[red]Feature coming soon - requires AWS permissions[/red]")
-    time.sleep(3)
+    
+    try:
+        # Get this instance's ENI
+        console.print("\n[cyan]Step 1: Getting defender instance ENI...[/cyan]")
+        instance_id_result = subprocess.run([
+            "curl", "-s", "http://169.254.169.254/latest/meta-data/instance-id"
+        ], capture_output=True, text=True)
+        instance_id = instance_id_result.stdout.strip()
+        
+        eni_result = subprocess.run([
+            "/usr/local/bin/aws", "ec2", "describe-instances",
+            "--instance-ids", instance_id,
+            "--region", "us-east-1",
+            "--query", "Reservations[0].Instances[0].NetworkInterfaces[0].NetworkInterfaceId",
+            "--output", "text"
+        ], capture_output=True, text=True)
+        
+        defender_eni = eni_result.stdout.strip()
+        console.print(f"[green]✓ Defender ENI: {defender_eni}[/green]")
+        
+        # Create mirror target
+        console.print("\n[cyan]Step 2: Creating VPC Traffic Mirror Target...[/cyan]")
+        target_result = subprocess.run([
+            "/usr/local/bin/aws", "ec2", "create-traffic-mirror-target",
+            "--network-interface-id", defender_eni,
+            "--description", "ELB DDoS Defender Mirror Target",
+            "--region", "us-east-1",
+            "--output", "json"
+        ], capture_output=True, text=True)
+        
+        if target_result.returncode == 0:
+            import json
+            target_data = json.loads(target_result.stdout)
+            target_id = target_data['TrafficMirrorTarget']['TrafficMirrorTargetId']
+            console.print(f"[green]✓ Mirror Target created: {target_id}[/green]")
+        else:
+            # Check if already exists
+            existing_result = subprocess.run([
+                "/usr/local/bin/aws", "ec2", "describe-traffic-mirror-targets",
+                "--filters", f"Name=network-interface-id,Values={defender_eni}",
+                "--region", "us-east-1",
+                "--query", "TrafficMirrorTargets[0].TrafficMirrorTargetId",
+                "--output", "text"
+            ], capture_output=True, text=True)
+            target_id = existing_result.stdout.strip()
+            if target_id and target_id != "None":
+                console.print(f"[yellow]⚠ Using existing target: {target_id}[/yellow]")
+            else:
+                console.print(f"[red]✗ Failed to create mirror target[/red]")
+                console.print(f"[dim]{target_result.stderr}[/dim]")
+                console.print("\n[dim]Press Enter to continue...[/dim]")
+                input()
+                return
+        
+        # Create mirror filter (all traffic)
+        console.print("\n[cyan]Step 3: Creating Traffic Mirror Filter (all traffic)...[/cyan]")
+        filter_result = subprocess.run([
+            "/usr/local/bin/aws", "ec2", "create-traffic-mirror-filter",
+            "--description", "ELB DDoS Defender - All Traffic",
+            "--region", "us-east-1",
+            "--output", "json"
+        ], capture_output=True, text=True)
+        
+        if filter_result.returncode == 0:
+            filter_data = json.loads(filter_result.stdout)
+            filter_id = filter_data['TrafficMirrorFilter']['TrafficMirrorFilterId']
+            console.print(f"[green]✓ Mirror Filter created: {filter_id}[/green]")
+            
+            # Add ingress rule (all traffic)
+            subprocess.run([
+                "/usr/local/bin/aws", "ec2", "create-traffic-mirror-filter-rule",
+                "--traffic-mirror-filter-id", filter_id,
+                "--traffic-direction", "ingress",
+                "--rule-number", "100",
+                "--rule-action", "accept",
+                "--source-cidr-block", "0.0.0.0/0",
+                "--destination-cidr-block", "0.0.0.0/0",
+                "--region", "us-east-1"
+            ], capture_output=True)
+            
+            # Add egress rule (all traffic)
+            subprocess.run([
+                "/usr/local/bin/aws", "ec2", "create-traffic-mirror-filter-rule",
+                "--traffic-mirror-filter-id", filter_id,
+                "--traffic-direction", "egress",
+                "--rule-number", "100",
+                "--rule-action", "accept",
+                "--source-cidr-block", "0.0.0.0/0",
+                "--destination-cidr-block", "0.0.0.0/0",
+                "--region", "us-east-1"
+            ], capture_output=True)
+            
+            console.print("[green]✓ Filter rules added (ingress + egress)[/green]")
+        else:
+            console.print(f"[red]✗ Failed to create mirror filter[/red]")
+            console.print("\n[dim]Press Enter to continue...[/dim]")
+            input()
+            return
+        
+        # Create mirror sessions for each LB ENI
+        console.print(f"\n[cyan]Step 4: Creating Mirror Sessions for {len(lbs)} load balancer(s)...[/cyan]")
+        sessions_created = 0
+        
+        for lb in lbs:
+            console.print(f"\n[yellow]Processing {lb['name']}...[/yellow]")
+            
+            # Get ENIs for this LB
+            search_pattern = f"ELB*{lb['name']}*"
+            eni_result = subprocess.run([
+                "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
+                "--filters", f"Name=description,Values={search_pattern}",
+                "--region", "us-east-1",
+                "--output", "json"
+            ], capture_output=True, text=True)
+            
+            if eni_result.returncode == 0:
+                enis_data = json.loads(eni_result.stdout)
+                enis = enis_data.get('NetworkInterfaces', [])
+                
+                for eni in enis:
+                    eni_id = eni['NetworkInterfaceId']
+                    az = eni.get('AvailabilityZone', 'unknown')
+                    
+                    # Create mirror session
+                    session_result = subprocess.run([
+                        "/usr/local/bin/aws", "ec2", "create-traffic-mirror-session",
+                        "--network-interface-id", eni_id,
+                        "--traffic-mirror-target-id", target_id,
+                        "--traffic-mirror-filter-id", filter_id,
+                        "--session-number", str(100 + sessions_created),
+                        "--description", f"Mirror {lb['name']} {az}",
+                        "--region", "us-east-1",
+                        "--output", "json"
+                    ], capture_output=True, text=True)
+                    
+                    if session_result.returncode == 0:
+                        session_data = json.loads(session_result.stdout)
+                        session_id = session_data['TrafficMirrorSession']['TrafficMirrorSessionId']
+                        console.print(f"  [green]✓ {eni_id} ({az}) → {session_id}[/green]")
+                        sessions_created += 1
+                    else:
+                        console.print(f"  [red]✗ Failed: {eni_id}[/red]")
+        
+        console.print(f"\n[bold green]✓ Setup complete! Created {sessions_created} mirror session(s)[/bold green]")
+        console.print("\n[cyan]Traffic from your load balancers is now being mirrored to this instance.[/cyan]")
+        console.print("[yellow]Restarting service to switch from simulation to real capture...[/yellow]")
+        
+        subprocess.run(['sudo', 'systemctl', 'restart', 'elb-ddos-defender'])
+        time.sleep(2)
+        
+        console.print("[green]✓ Service restarted - now capturing real traffic![/green]")
+        
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+    
+    console.print("\n[dim]Press Enter to continue...[/dim]")
+    input()
 
 def main():
     """Main dashboard loop"""
