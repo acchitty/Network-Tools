@@ -1,0 +1,63 @@
+# ELB DDoS Defender Configuration Template
+
+# Global Alert Settings
+alerts:
+  email:
+    enabled: true
+    backend: ses  # Options: ses, smtp, sendgrid
+    sender: security@example.com
+    recipients:
+      - admin@example.com
+    region: us-east-1
+  
+  sns:
+    enabled: false
+    topic_arn: ""
+  
+  slack:
+    enabled: false
+    webhook_url: ""
+
+# Load Balancers to Monitor
+load_balancers:
+  - name: my-application-alb
+    type: ALB
+    enabled: true
+    email_recipients:
+      - alb-team@example.com
+    thresholds:
+      connections_per_second: 100
+      bandwidth_mbps: 500
+    log_prefix: alb-app
+    metrics_namespace: ELB/Monitor/ALB-App
+  
+  - name: my-network-nlb
+    type: NLB
+    enabled: true
+    email_recipients:
+      - nlb-team@example.com
+    thresholds:
+      connections_per_second: 200
+      bandwidth_mbps: 1000
+    log_prefix: nlb-network
+    metrics_namespace: ELB/Monitor/NLB-Network
+
+# Global Thresholds (fallback if not specified per-LB)
+global_thresholds:
+  connections_per_second: 100
+  bandwidth_mbps: 500
+  syn_flood_threshold: 500
+  udp_flood_threshold: 1000
+  http_flood_threshold: 2000
+
+# Logging Configuration
+logging:
+  base_dir: /var/log/elb-ddos-defender
+  pcap_dir: /var/log/pcaps
+  reports_dir: /var/log/attack-reports
+  log_level: INFO
+
+# AWS Configuration
+aws:
+  region: us-east-1
+  account_id: ""

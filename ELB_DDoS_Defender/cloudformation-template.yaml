@@ -1,0 +1,305 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ELB DDoS Defender - Complete Infrastructure as Code'
+
+Parameters:
+  EmailAddress:
+    Type: String
+    Description: Email address for DDoS alerts
+    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where load balancers are located
+  
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for monitoring instance (same VPC as load balancers)
+  
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
+  
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - c5.large
+      - c5.xlarge
+    Description: EC2 instance type for monitoring
+  
+  LoadBalancerNames:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of load balancer names to monitor (e.g. my-alb,my-nlb)
+
+Resources:
+  # Security Group for Monitoring Instance
+  MonitoringSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ELB DDoS Defender Security Group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: udp
+          FromPort: 4789
+          ToPort: 4789
+          CidrIp: 0.0.0.0/0
+          Description: VXLAN traffic from VPC Traffic Mirroring
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+      Tags:
+        - Key: Name
+          Value: elb-ddos-defender-sg
+
+  # IAM Role for Monitoring Instance
+  MonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ELBDDoSDefenderRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: ELBDDoSDefenderPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:PutMetricAlarm
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:ModifyLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeNetworkAcls
+                  - ec2:CreateNetworkAclEntry
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:CreateTrafficMirrorTarget
+                  - ec2:CreateTrafficMirrorFilter
+                  - ec2:CreateTrafficMirrorFilterRule
+                  - ec2:CreateTrafficMirrorSession
+                  - ec2:DescribeTrafficMirrorTargets
+                  - ec2:DescribeTrafficMirrorFilters
+                  - ec2:DescribeTrafficMirrorSessions
+                  - ec2:CreateFlowLogs
+                  - ec2:DescribeFlowLogs
+                  - ec2:DescribeVpcs
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:CreateBucket
+                  - s3:PutBucketPolicy
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                  - ses:VerifyEmailIdentity
+                  - ses:GetIdentityVerificationAttributes
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - wafv2:CreateIPSet
+                  - wafv2:UpdateIPSet
+                  - wafv2:GetIPSet
+                  - wafv2:ListWebACLs
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - guardduty:ListDetectors
+                  - guardduty:ListFindings
+                  - guardduty:GetFindings
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:GetRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/VPCFlowLogsRole'
+
+  MonitoringInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MonitoringRole
+
+  # S3 Bucket for Access Logs
+  AccessLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'elb-access-logs-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 90
+
+  AccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 
+                - 'arn:aws:iam::${ELBAccount}:root'
+                - ELBAccount: !FindInMap [ELBAccountMap, !Ref 'AWS::Region', AccountId]
+            Action: s3:PutObject
+            Resource: !Sub '${AccessLogsBucket.Arn}/*'
+
+  # CloudWatch Log Group for VPC Flow Logs
+  VPCFlowLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/vpc/flowlogs
+      RetentionInDays: 30
+
+  # CloudWatch Log Group for Application
+  ApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/elb-monitor
+      RetentionInDays: 30
+
+  # EC2 Instance for Monitoring
+  MonitoringInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      IamInstanceProfile: !Ref MonitoringInstanceProfile
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref MonitoringSecurityGroup
+      SubnetId: !Ref SubnetId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          
+          # Install ELB DDoS Defender
+          curl -sSL https://raw.githubusercontent.com/YOUR-USERNAME/elb-ddos-defender/main/complete-install.sh | bash -s -- ${EmailAddress}
+          
+          # Wait for installation
+          sleep 30
+          
+          # Run setup script to enable logs and mirroring
+          cd /opt/elb-ddos-defender
+          ./setup-logs-and-mirroring.sh
+          
+          # Signal completion
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource MonitoringInstance --region ${AWS::Region}
+      Tags:
+        - Key: Name
+          Value: elb-ddos-defender
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+
+Mappings:
+  ELBAccountMap:
+    us-east-1:
+      AccountId: '127311923021'
+    us-east-2:
+      AccountId: '033677994240'
+    us-west-1:
+      AccountId: '027434742980'
+    us-west-2:
+      AccountId: '797873946194'
+    eu-west-1:
+      AccountId: '156460612806'
+    eu-central-1:
+      AccountId: '054676820928'
+    ap-southeast-1:
+      AccountId: '114774131450'
+    ap-southeast-2:
+      AccountId: '783225319266'
+    ap-south-1:
+      AccountId: '718504428378'
+
+Outputs:
+  InstanceId:
+    Description: Monitoring Instance ID
+    Value: !Ref MonitoringInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
+  
+  PublicIP:
+    Description: Public IP Address
+    Value: !GetAtt MonitoringInstance.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicIP'
+  
+  SSHCommand:
+    Description: SSH Command
+    Value: !Sub 'ssh -i ${KeyName}.pem ec2-user@${MonitoringInstance.PublicIp}'
+  
+  AccessLogsBucket:
+    Description: S3 Bucket for Access Logs
+    Value: !Ref AccessLogsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-AccessLogsBucket'
+  
+  LogsCommand:
+    Description: View Application Logs
+    Value: 'sudo tail -f /var/log/elb-ddos-defender.log'
+  
+  StatusCommand:
+    Description: Check Service Status
+    Value: 'sudo systemctl status elb-ddos-defender'
+  
+  ConfigFile:
+    Description: Configuration File Location
+    Value: '/opt/elb-ddos-defender/config.yaml'
