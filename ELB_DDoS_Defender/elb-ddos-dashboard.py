@@ -406,6 +406,14 @@ def setup_traffic_mirroring():
         ], capture_output=True, text=True)
         instance_id = instance_id_result.stdout.strip()
         
+        if not instance_id:
+            console.print("[red]✗ Could not get instance ID from metadata[/red]")
+            console.print("\n[dim]Press Enter to continue...[/dim]")
+            input()
+            return
+        
+        console.print(f"[green]Instance ID: {instance_id}[/green]")
+        
         eni_result = subprocess.run([
             "/usr/local/bin/aws", "ec2", "describe-instances",
             "--instance-ids", instance_id,
@@ -415,6 +423,14 @@ def setup_traffic_mirroring():
         ], capture_output=True, text=True)
         
         defender_eni = eni_result.stdout.strip()
+        
+        if not defender_eni or defender_eni == "None":
+            console.print("[red]✗ Could not get ENI for this instance[/red]")
+            console.print(f"[dim]Error: {eni_result.stderr}[/dim]")
+            console.print("\n[dim]Press Enter to continue...[/dim]")
+            input()
+            return
+            
         console.print(f"[green]✓ Defender ENI: {defender_eni}[/green]")
         
         # Create mirror target
