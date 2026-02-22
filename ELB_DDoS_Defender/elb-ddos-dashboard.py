@@ -1,14 +1,18 @@
 #!/usr/bin/env python3.11
-"""Interactive ELB DDoS Defender Dashboard"""
+"""Live ELB DDoS Defender Dashboard with Real-time Metrics"""
 import time
 import yaml
+import json
 import subprocess
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt
+from rich.live import Live
+from rich.layout import Layout
 from rich import box
+from rich.progress import Progress, BarColumn, TextColumn
 
 console = Console()
 
@@ -19,55 +23,141 @@ def load_config():
     except:
         return {}
 
-def show_menu():
-    console.clear()
-    console.print(Panel.fit(
-        "[bold cyan]ELB DDoS Defender - Interactive Dashboard[/bold cyan]\n"
-        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        border_style="cyan"
-    ))
-    console.print()
+def load_metrics():
+    """Load real-time metrics from service"""
+    try:
+        with open('/var/log/elb-ddos-defender/metrics.json', 'r') as f:
+            return json.load(f)
+    except:
+        return {
+            'total_packets': 0,
+            'total_bytes': 0,
+            'packets_per_sec': 0,
+            'connections_per_sec': 0,
+            'unique_ips': 0,
+            'syn_packets': 0,
+            'udp_packets': 0,
+            'attacks_detected': []
+        }
+
+def format_bytes(bytes_val):
+    """Format bytes to human readable"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_val < 1024:
+            return f"{bytes_val:.1f} {unit}"
+        bytes_val /= 1024
+    return f"{bytes_val:.1f} TB"
+
+def create_metrics_panel(metrics):
+    """Create real-time metrics display"""
     
+    # Traffic metrics
+    traffic_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    traffic_table.add_column("Metric", style="cyan")
+    traffic_table.add_column("Value", style="bold green")
+    
+    traffic_table.add_row("📊 Total Packets", f"{metrics['total_packets']:,}")
+    traffic_table.add_row("📈 Packets/sec", f"{metrics.get('packets_per_sec', 0):,}")
+    traffic_table.add_row("🔗 Connections/sec", f"{metrics['connections_per_sec']:,}")
+    traffic_table.add_row("💾 Total Traffic", format_bytes(metrics['total_bytes']))
+    traffic_table.add_row("🌐 Unique IPs", f"{metrics['unique_ips']:,}")
+    
+    # Protocol breakdown
+    protocol_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    protocol_table.add_column("Protocol", style="yellow")
+    protocol_table.add_column("Count", style="bold")
+    
+    protocol_table.add_row("SYN Packets", f"{metrics['syn_packets']:,}")
+    protocol_table.add_row("UDP Packets", f"{metrics['udp_packets']:,}")
+    
+    # Connection rate meter
+    conn_rate = metrics['connections_per_sec']
+    threshold = 1000
+    conn_percent = min(100, (conn_rate / threshold) * 100)
+    
+    meter_bar = "█" * int(conn_percent / 5) + "░" * (20 - int(conn_percent / 5))
+    meter_color = "green" if conn_rate < 500 else "yellow" if conn_rate < 800 else "red"
+    
+    meter_text = f"[{meter_color}]{meter_bar}[/{meter_color}] {conn_rate}/{threshold} conn/s"
+    
+    # Attacks
+    attacks = metrics.get('attacks_detected', [])
+    recent_attacks = attacks[-5:] if attacks else []
+    
+    attack_text = ""
+    if recent_attacks:
+        attack_text = "\n[bold red]⚠️  RECENT ATTACKS:[/bold red]\n"
+        for attack in recent_attacks:
+            attack_text += f"  • {attack['type']} from {attack['source']} ({attack['value']} conn/s)\n"
+    else:
+        attack_text = "\n[green]✓ No attacks detected[/green]"
+    
+    content = f"""[bold cyan]Real-time Traffic Metrics[/bold cyan]
+
+{traffic_table}
+
+[bold yellow]Protocol Analysis[/bold yellow]
+
+{protocol_table}
+
+[bold]Connection Rate Monitor[/bold]
+{meter_text}
+
+{attack_text}
+
+[dim]Last updated: {metrics.get('timestamp', 'N/A')}[/dim]
+"""
+    
+    return Panel(content, title="📡 Live Monitoring", border_style="cyan")
+
+def create_dashboard():
+    """Create main dashboard layout"""
     config = load_config()
+    metrics = load_metrics()
     
-    # Load Balancers
-    table = Table(title="Monitored Load Balancers", box=box.ROUNDED, show_header=True)
-    table.add_column("#", style="dim", width=5)
-    table.add_column("Name", style="cyan", width=20)
-    table.add_column("Status", style="green", width=15)
+    # Load balancers table
+    lb_table = Table(title="Monitored Load Balancers", box=box.ROUNDED, show_header=True)
+    lb_table.add_column("#", style="cyan", width=5)
+    lb_table.add_column("Name", style="green", width=25)
+    lb_table.add_column("Status", style="yellow", width=15)
     
     lbs = config.get('load_balancers', [])
     if lbs:
         for i, lb in enumerate(lbs, 1):
-            table.add_row(str(i), lb.get('name', 'Unknown'), "✓ Active")
+            lb_table.add_row(str(i), lb.get('name', 'Unknown'), "✓ Monitoring")
     else:
-        table.add_row("-", "No load balancers configured", "⚠ Pending")
-    
-    console.print(table)
-    console.print()
+        lb_table.add_row("-", "No load balancers configured", "⚠ Pending")
     
     # Menu
-    menu = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
-    menu.add_column(style="bold cyan")
-    menu.add_column(style="white")
+    menu = Table(title="Menu Options", box=box.ROUNDED, show_header=True, padding=(0, 2))
+    menu.add_column("Key", style="cyan bold", width=8)
+    menu.add_column("Action", style="white", width=40)
     
     menu.add_row("1", "Add Load Balancers to Monitor")
-    menu.add_row("2", "View Real-time Logs")
-    menu.add_row("3", "Check Service Status")
-    menu.add_row("4", "View Configuration")
-    menu.add_row("5", "Restart Service")
+    menu.add_row("2", "View Service Logs")
+    menu.add_row("3", "View Configuration")
+    menu.add_row("4", "Restart Service")
+    menu.add_row("5", "Setup VPC Traffic Mirroring")
     menu.add_row("R", "Refresh Dashboard")
     menu.add_row("Q", "Quit")
     
-    console.print(Panel(menu, title="[bold]Menu Options[/bold]", border_style="green"))
-    console.print()
+    # Layout
+    layout = Layout()
+    layout.split_column(
+        Layout(Panel(f"[bold cyan]ELB DDoS Defender - Live Dashboard[/bold cyan]\n[dim]{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]", 
+                    border_style="blue"), size=3),
+        Layout(lb_table, size=8),
+        Layout(create_metrics_panel(metrics)),
+        Layout(menu, size=12)
+    )
+    
+    return layout
 
 def add_load_balancers():
     console.clear()
     console.print("[bold cyan]Discover and Add Load Balancers[/bold cyan]\n")
     console.print("[yellow]Scanning for load balancers...[/yellow]\n")
     
-    # Get all load balancers
     result = subprocess.run(["/usr/local/bin/aws", "elbv2", "describe-load-balancers", 
                             "--region", "us-east-1", "--output", "json"],
                            capture_output=True, text=True)
@@ -78,7 +168,6 @@ def add_load_balancers():
         input()
         return
     
-    import json
     data = json.loads(result.stdout)
     lbs = data.get('LoadBalancers', [])
     
@@ -88,10 +177,9 @@ def add_load_balancers():
         input()
         return
     
-    # Show table of load balancers
     table = Table(title="Available Load Balancers", box=box.ROUNDED, show_header=True)
     table.add_column("#", style="cyan", width=5)
-    table.add_column("Name", style="green", width=20)
+    table.add_column("Name", style="green", width=25)
     table.add_column("Type", style="yellow", width=15)
     table.add_column("State", style="magenta", width=15)
     
@@ -101,8 +189,6 @@ def add_load_balancers():
     
     console.print(table)
     console.print()
-    
-    # Let user select
     console.print("[bold]Enter numbers to add (comma-separated, e.g., 1,3,4) or 'all':[/bold]")
     selection = input("> ").strip()
     
@@ -121,14 +207,11 @@ def add_load_balancers():
             time.sleep(2)
             return
     
-    # Load current config
     config = load_config()
     if 'load_balancers' not in config:
         config['load_balancers'] = []
     
-    # Add selected LBs
     for lb in selected_lbs:
-        # Check if already exists
         exists = any(existing['arn'] == lb['LoadBalancerArn'] 
                     for existing in config['load_balancers'])
         if not exists:
@@ -137,7 +220,6 @@ def add_load_balancers():
                 'arn': lb['LoadBalancerArn']
             })
     
-    # Save config
     with open('/tmp/config.yaml', 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
     
@@ -149,46 +231,40 @@ def add_load_balancers():
 
 def view_logs():
     console.clear()
-    console.print("[bold cyan]Real-time Logs (Press Ctrl+C to return)[/bold cyan]\n")
-    try:
-        subprocess.run(["tail", "-f", "/var/log/elb-ddos-defender/defender.log"])
-    except KeyboardInterrupt:
-        pass
-
-def check_status():
-    console.clear()
-    console.print("[bold cyan]Service Status[/bold cyan]\n")
-    subprocess.run(["systemctl", "status", "elb-ddos-defender"])
-    console.print("\n[dim]Press Enter to continue...[/dim]")
-    input()
+    console.print("[bold cyan]Service Logs (Ctrl+C to exit)[/bold cyan]\n")
+    subprocess.run(['sudo', 'tail', '-f', '/var/log/elb-ddos-defender/defender.log'])
 
 def view_config():
     console.clear()
-    console.print("[bold cyan]Configuration[/bold cyan]\n")
-    subprocess.run(["cat", "/opt/elb-ddos-defender/config.yaml"])
-    console.print("\n[dim]Press Enter to continue...[/dim]")
-    input()
-
-def list_load_balancers():
-    console.clear()
-    console.print("[bold cyan]All Load Balancers in Region[/bold cyan]\n")
-    subprocess.run(["/usr/local/bin/aws", "elbv2", "describe-load-balancers", 
-                    "--region", "us-east-1", "--query", 
-                    "LoadBalancers[*].[LoadBalancerName,LoadBalancerArn]", 
-                    "--output", "table"])
+    console.print("[bold cyan]Current Configuration[/bold cyan]\n")
+    subprocess.run(['cat', '/opt/elb-ddos-defender/config.yaml'])
     console.print("\n[dim]Press Enter to continue...[/dim]")
     input()
 
 def restart_service():
     console.clear()
-    console.print("[bold yellow]Restarting service...[/bold yellow]\n")
-    subprocess.run(["systemctl", "restart", "elb-ddos-defender"])
-    console.print("[bold green]✓ Service restarted![/bold green]")
+    console.print("[yellow]Restarting service...[/yellow]")
+    subprocess.run(['sudo', 'systemctl', 'restart', 'elb-ddos-defender'])
+    time.sleep(2)
+    console.print("[green]✓ Service restarted[/green]")
     time.sleep(2)
 
+def setup_traffic_mirroring():
+    console.clear()
+    console.print("[bold cyan]VPC Traffic Mirroring Setup[/bold cyan]\n")
+    console.print("[yellow]This will configure traffic mirroring from your ELBs to this instance[/yellow]\n")
+    console.print("[dim]Press Enter to continue or Ctrl+C to cancel...[/dim]")
+    input()
+    console.print("\n[red]Feature coming soon - requires AWS permissions[/red]")
+    time.sleep(3)
+
 def main():
+    """Main dashboard loop"""
     while True:
-        show_menu()
+        console.clear()
+        layout = create_dashboard()
+        console.print(layout)
+        
         choice = Prompt.ask("[bold cyan]Select option[/bold cyan]", 
                            choices=["1", "2", "3", "4", "5", "r", "R", "q", "Q"],
                            default="r")
@@ -202,13 +278,13 @@ def main():
         elif choice == "2":
             view_logs()
         elif choice == "3":
-            check_status()
-        elif choice == "4":
             view_config()
-        elif choice == "5":
+        elif choice == "4":
             restart_service()
+        elif choice == "5":
+            setup_traffic_mirroring()
         elif choice in ["r", "R"]:
             continue
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
