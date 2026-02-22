@@ -399,15 +399,41 @@ def setup_traffic_mirroring():
     input()
     
     try:
-        # Get this instance's ENI
+        # Get this instance's ENI using IMDSv2
         console.print("\n[cyan]Step 1: Getting defender instance ENI...[/cyan]")
-        instance_id_result = subprocess.run([
-            "curl", "-s", "http://169.254.169.254/latest/meta-data/instance-id"
-        ], capture_output=True, text=True)
-        instance_id = instance_id_result.stdout.strip()
         
-        if not instance_id:
-            console.print("[red]✗ Could not get instance ID from metadata[/red]")
+        # Get instance ID from IMDS
+        token_result = subprocess.run([
+            "curl", "-X", "PUT", "-H", "X-aws-ec2-metadata-token-ttl-seconds: 21600",
+            "http://169.254.169.254/latest/api/token"
+        ], capture_output=True, text=True, timeout=5)
+        
+        if token_result.returncode == 0 and token_result.stdout:
+            token = token_result.stdout.strip()
+            instance_id_result = subprocess.run([
+                "curl", "-H", f"X-aws-ec2-metadata-token: {token}",
+                "http://169.254.169.254/latest/meta-data/instance-id"
+            ], capture_output=True, text=True, timeout=5)
+            instance_id = instance_id_result.stdout.strip()
+        else:
+            # Fallback: get from AWS CLI
+            region_result = subprocess.run([
+                "curl", "-s", "http://169.254.169.254/latest/meta-data/placement/region"
+            ], capture_output=True, text=True, timeout=5)
+            region = region_result.stdout.strip() or "us-east-1"
+            
+            # Get instance ID from tags or describe-instances
+            instance_id_result = subprocess.run([
+                "/usr/local/bin/aws", "ec2", "describe-instances",
+                "--filters", "Name=instance-state-name,Values=running",
+                "--region", region,
+                "--query", "Reservations[0].Instances[0].InstanceId",
+                "--output", "text"
+            ], capture_output=True, text=True)
+            instance_id = instance_id_result.stdout.strip()
+        
+        if not instance_id or instance_id == "None":
+            console.print("[red]✗ Could not get instance ID[/red]")
             console.print("\n[dim]Press Enter to continue...[/dim]")
             input()
             return
