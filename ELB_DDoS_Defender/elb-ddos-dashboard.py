@@ -270,7 +270,7 @@ def view_eni_details():
         console.print(f"\n[bold green]Load Balancer: {lb['name']}[/bold green]")
         console.print(f"[dim]ARN: {lb['arn']}[/dim]\n")
         
-        # Get detailed ENI info
+        # Get LB details
         result = subprocess.run([
             "/usr/local/bin/aws", "elbv2", "describe-load-balancers",
             "--load-balancer-arns", lb['arn'],
@@ -281,27 +281,48 @@ def view_eni_details():
         if result.returncode == 0:
             import json
             data = json.loads(result.stdout)
-            azs = data['LoadBalancers'][0].get('AvailabilityZones', [])
+            lb_data = data['LoadBalancers'][0]
+            vpc_id = lb_data.get('VpcId')
+            azs = lb_data.get('AvailabilityZones', [])
+            
+            # Get ENIs for this LB by searching VPC
+            eni_result = subprocess.run([
+                "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
+                "--filters", f"Name=vpc-id,Values={vpc_id}",
+                f"Name=description,Values=*{lb['name']}*",
+                "--region", "us-east-1",
+                "--query", "NetworkInterfaces[*].[NetworkInterfaceId,PrivateIpAddress,SubnetId,AvailabilityZone]",
+                "--output", "json"
+            ], capture_output=True, text=True)
             
             table = Table(box=box.SIMPLE, show_header=True)
             table.add_column("AZ", style="cyan", width=15)
             table.add_column("Subnet ID", style="yellow", width=25)
             table.add_column("ENI ID", style="green", width=25)
-            table.add_column("IP Address", style="magenta", width=18)
+            table.add_column("Private IP", style="magenta", width=18)
             
-            for az in azs:
-                az_name = az.get('ZoneName', 'N/A')
-                subnet_id = az.get('SubnetId', 'N/A')
-                
-                # Get ENI and IPs
-                addresses = az.get('LoadBalancerAddresses', [])
-                if addresses:
-                    for addr in addresses:
-                        eni_id = addr.get('AllocationId', 'N/A')
-                        ip = addr.get('IpAddress', 'N/A')
-                        table.add_row(az_name, subnet_id, eni_id, ip)
+            if eni_result.returncode == 0:
+                enis = json.loads(eni_result.stdout)
+                if enis:
+                    for eni in enis:
+                        table.add_row(eni[3], eni[2], eni[0], eni[1])
                 else:
-                    table.add_row(az_name, subnet_id, "N/A", "N/A")
+                    # Fallback to AZ info
+                    for az in azs:
+                        table.add_row(
+                            az.get('ZoneName', 'N/A'),
+                            az.get('SubnetId', 'N/A'),
+                            "Not found",
+                            "N/A"
+                        )
+            else:
+                for az in azs:
+                    table.add_row(
+                        az.get('ZoneName', 'N/A'),
+                        az.get('SubnetId', 'N/A'),
+                        "Error",
+                        "N/A"
+                    )
             
             console.print(table)
         else:
