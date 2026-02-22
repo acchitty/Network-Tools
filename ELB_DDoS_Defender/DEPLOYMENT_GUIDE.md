@@ -1,5 +1,15 @@
 # ELB DDoS Defender - Complete Deployment Guide
 
+**Version 2.0 - Real-time Traffic Monitoring**
+
+## What's New in v2.0 ✨
+- ✅ **Real-time traffic monitoring** with packet capture
+- ✅ **Live metrics dashboard** with visual meters and graphs
+- ✅ **Attack detection** (connection floods, DDoS patterns)
+- ✅ **Interactive ELB selection** from dashboard
+- ✅ **Simulation mode** for testing without VPC Traffic Mirroring
+- ✅ **Metrics export** (JSON file updated every second)
+
 ## 🚀 Quick Start (5 Minutes)
 
 ### Choose Your Deployment Method
