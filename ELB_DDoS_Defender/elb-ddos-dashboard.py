@@ -256,7 +256,17 @@ def add_load_balancers():
     subprocess.run(['sudo', 'systemctl', 'restart', 'elb-ddos-defender'])
     
     console.print(f"\n[bold green]✓ Added {len(selected_lbs)} load balancer(s) and restarted service![/bold green]")
-    time.sleep(3)
+    
+    # Ask if user wants to set up traffic mirroring
+    console.print("\n[cyan]Would you like to set up VPC Traffic Mirroring now?[/cyan]")
+    console.print("[dim]This will mirror traffic from the ELB ENIs to this instance for monitoring.[/dim]")
+    setup_now = Prompt.ask("\nSet up traffic mirroring?", choices=["y", "n"], default="y")
+    
+    if setup_now.lower() == "y":
+        setup_traffic_mirroring()
+    else:
+        console.print("\n[yellow]You can set up traffic mirroring later from the main menu (option 6)[/yellow]")
+        time.sleep(3)
 
 def view_eni_details():
     """Show detailed ENI information for all load balancers"""
