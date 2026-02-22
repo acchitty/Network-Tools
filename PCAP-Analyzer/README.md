@@ -13,24 +13,27 @@ All outputs save to: `~/Desktop/pcap_analysis_output/`
 1. [Installation](#installation)
 2. [Basic Usage](#basic-usage)
 3. [Command Options](#command-options)
-4. [Output Files](#output-files)
-5. [Features](#features)
-6. [Performance](#performance)
-7. [Troubleshooting](#troubleshooting)
-8. [Examples](#examples)
+4. [AWS-Specific Analysis](#aws-specific-analysis)
+5. [Output Files](#output-files)
+6. [Features](#features)
+7. [Performance](#performance)
+8. [Troubleshooting](#troubleshooting)
+9. [Examples](#examples)
 
 ## 📦 INSTALLATION
 
 Run the installer:
 ```bash
-cd PCAP_Analyzer_Deployment
+cd PCAP_Analyzer_Deployment/PCAP-Analyzer
 ./install.sh
 ```
 
 **What it installs:**
-- Python dependencies
-- Analyzer script (`~/.pcap_tools/`)
-- `analyze` command (`/usr/local/bin/`)
+- Python dependencies (scapy, matplotlib, networkx)
+- Main analyzer script (`~/.pcap_tools/pcap_analyzer_v3.py`)
+- AWS detection module (`~/.pcap_tools/aws_detection.py`)
+- Security analysis module (`~/.pcap_tools/security_analysis.py`)
+- `analyze` command (`/usr/local/bin/analyze`)
 - Output folder (`~/Desktop/pcap_analysis_output/`)
 
 ## 🎯 BASIC USAGE
@@ -40,6 +43,11 @@ cd PCAP_Analyzer_Deployment
 analyze capture.pcap
 ```
 
+### AWS-Specific Analysis (15 seconds)
+```bash
+analyze capture.pcap --aws --security
+```
+
 ### With Visual Diagrams (30 seconds)
 ```bash
 analyze capture.pcap --visual
@@ -47,7 +55,7 @@ analyze capture.pcap --visual
 
 ### Full Analysis (3 minutes)
 ```bash
-analyze capture.pcap --visual --whois --tor --export-json
+analyze capture.pcap --visual --whois --tor --export-json --aws --security
 ```
 
 ## ⚙️ COMMAND OPTIONS
@@ -58,10 +66,99 @@ analyze capture.pcap --visual --whois --tor --export-json
 | `--whois` | Perform IP geolocation lookups | +2 min |
 | `--tor` | Check for Tor exit nodes | +5 sec |
 | `--export-json` | Export data to JSON file | +1 sec |
+| `--aws` | AWS-specific analysis (ELB, IMDS, NAT, TGW) | +2 sec |
+| `--security` | Security analysis (SG blocks, RST, DDoS, scans) | +2 sec |
 
 **Combine flags:**
 ```bash
-analyze capture.pcap --visual --tor
+analyze capture.pcap --visual --tor --aws --security
+```
+
+## 🔧 AWS-SPECIFIC ANALYSIS
+
+### `--aws` Flag
+
+Detects AWS service traffic patterns:
+
+**ELB Health Checks:**
+- ALB (ELB-HealthChecker/2.0)
+- CLB (ELB-HealthChecker/1.0)
+- NLB (TCP SYN/SYN-ACK patterns)
+- Success/failure rates per target
+- Failed health check details
+
+**IMDS Access (169.254.169.254):**
+- IMDSv1 (GET) vs IMDSv2 (PUT token)
+- Security warnings for IMDSv1 usage
+- Most accessed metadata paths
+- Source IPs accessing IMDS
+
+**NAT Gateway:**
+- Connection count tracking
+- RST packet analysis
+- Port exhaustion detection (>50k connections)
+- Timeout identification
+
+**Transit Gateway:**
+- Cross-VPC traffic detection
+- VPC CIDR identification
+- Asymmetric routing patterns
+
+### `--security` Flag
+
+Detects security issues and attacks:
+
+**Security Group Blocks:**
+- SYN without SYN-ACK (silent drops)
+- Blocked connection attempts
+- Source/destination analysis
+
+**TCP RST Analysis:**
+- Total RST count
+- Top sources sending RSTs
+- Top destination ports
+- RST patterns:
+  - Firewall/security appliance RST
+  - Service not listening
+  - Connection refused
+
+**DDoS/Flood Detection:**
+- TCP SYN flood (>1000 SYN/sec)
+- UDP flood (>5000 UDP/sec)
+- ICMP flood (>1000 ICMP/sec)
+- DNS amplification attacks
+
+**Port Scan Detection:**
+- Sources scanning >20 ports
+- Scanned port lists
+- Scanner IP identification
+
+**Example:**
+```bash
+analyze alb-traffic.pcap --aws --security
+```
+
+**Output:**
+```
+[ELB Health Checks]
+  Total: 45
+    ALB (v2.0): 30
+    CLB (v1.0): 10
+    NLB (TCP): 5
+  Success: 42
+  Failures: 3
+
+[IMDS Access - 169.254.169.254]
+  ⚠️  WARNING: IMDSv1 access detected!
+     Consider migrating to IMDSv2
+
+[Security Group Blocks Detected]
+  Total: 8
+  💡 Recommendation: Check security group rules
+
+[Port Scan Detection]
+  ⚠️  198.51.100.25 scanned 23 ports
+  💡 Recommendation: Block scanner IPs in NACL
 ```
 
 ## 📁 OUTPUT FILES
