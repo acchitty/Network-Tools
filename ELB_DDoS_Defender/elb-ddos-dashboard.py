@@ -301,17 +301,23 @@ def view_eni_details():
             table.add_column("Subnet ID", style="yellow", width=25)
             table.add_column("ENI ID", style="green", width=25)
             table.add_column("Private IP", style="magenta", width=18)
+            table.add_column("Public IP", style="blue", width=18)
             
             if eni_result.returncode == 0:
                 enis_data = json.loads(eni_result.stdout)
                 enis = enis_data.get('NetworkInterfaces', [])
                 if enis:
                     for eni in enis:
+                        # Get public IP if exists
+                        association = eni.get('Association', {})
+                        public_ip = association.get('PublicIp', 'N/A')
+                        
                         table.add_row(
                             eni.get('AvailabilityZone', 'N/A'),
                             eni.get('SubnetId', 'N/A'),
                             eni.get('NetworkInterfaceId', 'N/A'),
-                            eni.get('PrivateIpAddress', 'N/A')
+                            eni.get('PrivateIpAddress', 'N/A'),
+                            public_ip
                         )
                 else:
                     # Fallback to AZ info
