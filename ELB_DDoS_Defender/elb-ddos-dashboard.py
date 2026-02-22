@@ -293,7 +293,6 @@ def view_eni_details():
                 "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
                 "--filters", f"Name=description,Values={search_pattern}",
                 "--region", "us-east-1",
-                "--query", "NetworkInterfaces[*].[NetworkInterfaceId,PrivateIpAddress,SubnetId,AvailabilityZone]",
                 "--output", "json"
             ], capture_output=True, text=True)
             
@@ -304,10 +303,16 @@ def view_eni_details():
             table.add_column("Private IP", style="magenta", width=18)
             
             if eni_result.returncode == 0:
-                enis = json.loads(eni_result.stdout)
+                enis_data = json.loads(eni_result.stdout)
+                enis = enis_data.get('NetworkInterfaces', [])
                 if enis:
                     for eni in enis:
-                        table.add_row(eni[3], eni[2], eni[0], eni[1])
+                        table.add_row(
+                            eni.get('AvailabilityZone', 'N/A'),
+                            eni.get('SubnetId', 'N/A'),
+                            eni.get('NetworkInterfaceId', 'N/A'),
+                            eni.get('PrivateIpAddress', 'N/A')
+                        )
                 else:
                     # Fallback to AZ info
                     for az in azs:
