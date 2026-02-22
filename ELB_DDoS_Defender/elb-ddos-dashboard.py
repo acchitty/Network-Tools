@@ -50,6 +50,8 @@ def format_bytes(bytes_val):
 
 def create_metrics_panel(metrics):
     """Create real-time metrics display"""
+    from rich.console import Group
+    from rich.text import Text
     
     # Traffic metrics
     traffic_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
@@ -78,37 +80,41 @@ def create_metrics_panel(metrics):
     meter_bar = "█" * int(conn_percent / 5) + "░" * (20 - int(conn_percent / 5))
     meter_color = "green" if conn_rate < 500 else "yellow" if conn_rate < 800 else "red"
     
-    meter_text = f"[{meter_color}]{meter_bar}[/{meter_color}] {conn_rate}/{threshold} conn/s"
+    meter_text = Text()
+    meter_text.append(meter_bar, style=meter_color)
+    meter_text.append(f" {conn_rate}/{threshold} conn/s")
     
     # Attacks
     attacks = metrics.get('attacks_detected', [])
     recent_attacks = attacks[-5:] if attacks else []
     
-    attack_text = ""
+    # Build content as Group
+    content_parts = [
+        Text("Real-time Traffic Metrics", style="bold cyan"),
+        Text(""),
+        traffic_table,
+        Text(""),
+        Text("Protocol Analysis", style="bold yellow"),
+        Text(""),
+        protocol_table,
+        Text(""),
+        Text("Connection Rate Monitor", style="bold"),
+        meter_text,
+    ]
+    
     if recent_attacks:
-        attack_text = "\n[bold red]⚠️  RECENT ATTACKS:[/bold red]\n"
+        content_parts.append(Text(""))
+        content_parts.append(Text("⚠️  RECENT ATTACKS:", style="bold red"))
         for attack in recent_attacks:
-            attack_text += f"  • {attack['type']} from {attack['source']} ({attack['value']} conn/s)\n"
+            content_parts.append(Text(f"  • {attack['type']} from {attack['source']} ({attack['value']} conn/s)"))
     else:
-        attack_text = "\n[green]✓ No attacks detected[/green]"
+        content_parts.append(Text(""))
+        content_parts.append(Text("✓ No attacks detected", style="green"))
     
-    content = f"""[bold cyan]Real-time Traffic Metrics[/bold cyan]
-
-{traffic_table}
-
-[bold yellow]Protocol Analysis[/bold yellow]
-
-{protocol_table}
-
-[bold]Connection Rate Monitor[/bold]
-{meter_text}
-
-{attack_text}
-
-[dim]Last updated: {metrics.get('timestamp', 'N/A')}[/dim]
-"""
+    content_parts.append(Text(""))
+    content_parts.append(Text(f"Last updated: {metrics.get('timestamp', 'N/A')}", style="dim"))
     
-    return Panel(content, title="📡 Live Monitoring", border_style="cyan")
+    return Panel(Group(*content_parts), title="📡 Live Monitoring", border_style="cyan")
 
 def create_dashboard():
     """Create main dashboard layout"""
