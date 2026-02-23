@@ -132,27 +132,8 @@ def create_dashboard():
     lbs = config.get('load_balancers', [])
     if lbs:
         for i, lb in enumerate(lbs, 1):
-            # Get ENI and IP info
-            try:
-                result = subprocess.run([
-                    "/usr/local/bin/aws", "elbv2", "describe-load-balancers",
-                    "--load-balancer-arns", lb['arn'],
-                    "--region", "us-east-1",
-                    "--query", "LoadBalancers[0].AvailabilityZones[*].[NetworkInterfaceId,LoadBalancerAddresses[0].IpAddress]",
-                    "--output", "json"
-                ], capture_output=True, text=True, timeout=5)
-                
-                if result.returncode == 0:
-                    import json
-                    data = json.loads(result.stdout)
-                    eni_count = len(data) if data else 0
-                    ips = [item[1] for item in data if item and len(item) > 1 and item[1]]
-                    ip_display = ", ".join(ips[:2]) + ("..." if len(ips) > 2 else "")
-                    lb_table.add_row(str(i), lb.get('name', 'Unknown'), f"{eni_count} ENIs", ip_display or "N/A", "✓ Active")
-                else:
-                    lb_table.add_row(str(i), lb.get('name', 'Unknown'), "?", "N/A", "✓ Active")
-            except:
-                lb_table.add_row(str(i), lb.get('name', 'Unknown'), "?", "N/A", "✓ Active")
+            # Just show ENI count, skip IP lookup for speed
+            lb_table.add_row(str(i), lb.get('name', 'Unknown'), "View in option 2", "-", "✓ Active")
     else:
         lb_table.add_row("-", "No load balancers configured", "-", "-", "⚠ Pending")
     
