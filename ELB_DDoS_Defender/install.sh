@@ -36,11 +36,7 @@ if [ ! -f config.yaml ]; then
 aws:
   region: us-east-1
 
-load_balancers:
-  - name: ALBTest
-    type: application
-  - name: NLB-A-TEST
-    type: network
+load_balancers: []
 
 thresholds:
   syn_flood_ratio: 3.0
