@@ -102,7 +102,7 @@ def create_dashboard():
             try:
                 search_pattern = f"ELB*{lb['name']}*"
                 result = subprocess.run([
-                    "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
+                    "/usr/bin/aws", "ec2", "describe-network-interfaces",
                     "--filters", f"Name=description,Values={search_pattern}",
                     "--region", "us-east-1",
                     "--query", "NetworkInterfaces[*].PrivateIpAddress",
@@ -154,7 +154,7 @@ def add_load_balancers():
     console.print("[bold cyan]Discover and Add Load Balancers[/bold cyan]\n")
     console.print("[yellow]Scanning for load balancers...[/yellow]\n")
     
-    result = subprocess.run(["/usr/local/bin/aws", "elbv2", "describe-load-balancers", 
+    result = subprocess.run(["/usr/bin/aws", "elbv2", "describe-load-balancers", 
                             "--region", "us-east-1", "--output", "json"],
                            capture_output=True, text=True)
     
@@ -255,7 +255,7 @@ def view_eni_details():
         
         # Get LB details
         result = subprocess.run([
-            "/usr/local/bin/aws", "elbv2", "describe-load-balancers",
+            "/usr/bin/aws", "elbv2", "describe-load-balancers",
             "--load-balancer-arns", lb['arn'],
             "--region", "us-east-1",
             "--output", "json"
@@ -273,7 +273,7 @@ def view_eni_details():
             search_pattern = f"ELB*{lb['name']}*"
             
             eni_result = subprocess.run([
-                "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
+                "/usr/bin/aws", "ec2", "describe-network-interfaces",
                 "--filters", f"Name=description,Values={search_pattern}",
                 "--region", "us-east-1",
                 "--output", "json"
@@ -391,7 +391,7 @@ def setup_traffic_mirroring():
             
             # Get instance ID from tags or describe-instances
             instance_id_result = subprocess.run([
-                "/usr/local/bin/aws", "ec2", "describe-instances",
+                "/usr/bin/aws", "ec2", "describe-instances",
                 "--filters", "Name=instance-state-name,Values=running",
                 "--region", region,
                 "--query", "Reservations[0].Instances[0].InstanceId",
@@ -408,7 +408,7 @@ def setup_traffic_mirroring():
         console.print(f"[green]Instance ID: {instance_id}[/green]")
         
         eni_result = subprocess.run([
-            "/usr/local/bin/aws", "ec2", "describe-instances",
+            "/usr/bin/aws", "ec2", "describe-instances",
             "--instance-ids", instance_id,
             "--region", "us-east-1",
             "--query", "Reservations[0].Instances[0].NetworkInterfaces[0].NetworkInterfaceId",
@@ -429,7 +429,7 @@ def setup_traffic_mirroring():
         # Create mirror target
         console.print("\n[cyan]Step 2: Creating VPC Traffic Mirror Target...[/cyan]")
         target_result = subprocess.run([
-            "/usr/local/bin/aws", "ec2", "create-traffic-mirror-target",
+            "/usr/bin/aws", "ec2", "create-traffic-mirror-target",
             "--network-interface-id", defender_eni,
             "--description", "ELB DDoS Defender Mirror Target",
             "--region", "us-east-1",
@@ -444,7 +444,7 @@ def setup_traffic_mirroring():
         else:
             # Check if already exists
             existing_result = subprocess.run([
-                "/usr/local/bin/aws", "ec2", "describe-traffic-mirror-targets",
+                "/usr/bin/aws", "ec2", "describe-traffic-mirror-targets",
                 "--filters", f"Name=network-interface-id,Values={defender_eni}",
                 "--region", "us-east-1",
                 "--query", "TrafficMirrorTargets[0].TrafficMirrorTargetId",
@@ -463,7 +463,7 @@ def setup_traffic_mirroring():
         # Create mirror filter (all traffic)
         console.print("\n[cyan]Step 3: Creating Traffic Mirror Filter (all traffic)...[/cyan]")
         filter_result = subprocess.run([
-            "/usr/local/bin/aws", "ec2", "create-traffic-mirror-filter",
+            "/usr/bin/aws", "ec2", "create-traffic-mirror-filter",
             "--description", "ELB DDoS Defender - All Traffic",
             "--region", "us-east-1",
             "--output", "json"
@@ -476,7 +476,7 @@ def setup_traffic_mirroring():
             
             # Add ingress rule (all traffic)
             subprocess.run([
-                "/usr/local/bin/aws", "ec2", "create-traffic-mirror-filter-rule",
+                "/usr/bin/aws", "ec2", "create-traffic-mirror-filter-rule",
                 "--traffic-mirror-filter-id", filter_id,
                 "--traffic-direction", "ingress",
                 "--rule-number", "100",
@@ -488,7 +488,7 @@ def setup_traffic_mirroring():
             
             # Add egress rule (all traffic)
             subprocess.run([
-                "/usr/local/bin/aws", "ec2", "create-traffic-mirror-filter-rule",
+                "/usr/bin/aws", "ec2", "create-traffic-mirror-filter-rule",
                 "--traffic-mirror-filter-id", filter_id,
                 "--traffic-direction", "egress",
                 "--rule-number", "100",
@@ -515,7 +515,7 @@ def setup_traffic_mirroring():
             # Get ENIs for this LB
             search_pattern = f"ELB*{lb['name']}*"
             eni_result = subprocess.run([
-                "/usr/local/bin/aws", "ec2", "describe-network-interfaces",
+                "/usr/bin/aws", "ec2", "describe-network-interfaces",
                 "--filters", f"Name=description,Values={search_pattern}",
                 "--region", "us-east-1",
                 "--output", "json"
@@ -531,7 +531,7 @@ def setup_traffic_mirroring():
                     
                     # Create mirror session
                     session_result = subprocess.run([
-                        "/usr/local/bin/aws", "ec2", "create-traffic-mirror-session",
+                        "/usr/bin/aws", "ec2", "create-traffic-mirror-session",
                         "--network-interface-id", eni_id,
                         "--traffic-mirror-target-id", target_id,
                         "--traffic-mirror-filter-id", filter_id,
