@@ -1,0 +1,14 @@
+[Unit]
+Description=ELB DDoS Defender Web Dashboard
+After=network.target elb-ddos-defender.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/elb-ddos-defender
+ExecStart=/usr/bin/python3.11 /opt/elb-ddos-defender/elb-ddos-web.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ELB DDoS Defender - Live Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            opacity: 0.8;
+            font-size: 0.9em;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .card h3 {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .card .value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .card .label {
+            font-size: 0.8em;
+            opacity: 0.7;
+        }
+        .chart-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .attacks-feed {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .attack-item {
+            background: rgba(255, 0, 0, 0.2);
+            border-left: 4px solid #ff4444;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+        .attack-item .time {
+            opacity: 0.7;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+        .attack-item .details {
+            font-weight: bold;
+        }
+        .top-attackers {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        th {
+            background: rgba(255, 255, 255, 0.1);
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 1px;
+        }
+        .ip-link {
+            color: #4fc3f7;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .ip-link:hover {
+            color: #81d4fa;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .status-active {
+            background: #4caf50;
+            color: white;
+        }
+        .status-inactive {
+            background: #f44336;
+            color: white;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover { color: #fff; }
+        .whois-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            opacity: 0.7;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse { animation: pulse 2s infinite; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ ELB DDoS Defender</h1>
+        <div class="subtitle">
+            Live Dashboard | Auto-refresh: 5s | 
+            <span id="lastUpdate">Loading...</span> | 
+            Service: <span id="serviceStatus" class="status-badge">Checking...</span>
+        </div>
+
+        <!-- Metrics Cards -->
+        <div class="grid">
+            <div class="card">
+                <h3>Total Packets</h3>
+                <div class="value" id="totalPackets">0</div>
+                <div class="label">Captured</div>
+            </div>
+            <div class="card">
+                <h3>Packets/Sec</h3>
+                <div class="value" id="packetsPerSec">0</div>
+                <div class="label">Current Rate</div>
+            </div>
+            <div class="card">
+                <h3>Connections/Sec</h3>
+                <div class="value" id="connectionsPerSec">0</div>
+                <div class="label">Active</div>
+            </div>
+            <div class="card">
+                <h3>Unique IPs</h3>
+                <div class="value" id="uniqueIps">0</div>
+                <div class="label">Sources</div>
+            </div>
+            <div class="card">
+                <h3>SYN Packets</h3>
+                <div class="value" id="synPackets">0</div>
+                <div class="label">Total</div>
+            </div>
+            <div class="card">
+                <h3>UDP Packets</h3>
+                <div class="value" id="udpPackets">0</div>
+                <div class="label">Total</div>
+            </div>
+            <div class="card">
+                <h3>Total Bytes</h3>
+                <div class="value" id="totalBytes">0</div>
+                <div class="label">Transferred</div>
+            </div>
+            <div class="card">
+                <h3>Attacks Detected</h3>
+                <div class="value" id="attacksCount" style="color: #ff4444;">0</div>
+                <div class="label">Total</div>
+            </div>
+        </div>
+
+        <!-- Packet Rate Chart -->
+        <div class="chart-container">
+            <h3 style="margin-bottom: 15px;">📊 Packet Rate (Last 60 Seconds)</h3>
+            <canvas id="packetChart"></canvas>
+        </div>
+
+        <!-- Recent Attacks Feed -->
+        <div class="attacks-feed">
+            <h3 style="margin-bottom: 15px;">⚠️ Recent Attacks</h3>
+            <div id="attacksFeed">
+                <div class="loading pulse">No attacks detected</div>
+            </div>
+        </div>
+
+        <!-- Top Attackers Table -->
+        <div class="top-attackers">
+            <h3 style="margin-bottom: 15px;">🎯 Top 10 Attacking IPs</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>IP Address</th>
+                        <th>Attack Count</th>
+                        <th>Attack Types</th>
+                        <th>Target</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody id="topAttackersTable">
+                    <tr><td colspan="6" class="loading pulse">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- WHOIS Modal -->
+    <div id="whoisModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle">IP Investigation</h2>
+            <div id="modalContent" class="whois-info">
+                <div class="loading pulse">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart setup
+        const ctx = document.getElementById('packetChart').getContext('2d');
+        const packetData = {
+            labels: [],
+            datasets: [{
+                label: 'Packets/Sec',
+                data: [],
+                borderColor: '#4fc3f7',
+                backgroundColor: 'rgba(79, 195, 247, 0.2)',
+                tension: 0.4,
+                fill: true
+            }]
+        };
+        const packetChart = new Chart(ctx, {
+            type: 'line',
+            data: packetData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    x: {
+                        ticks: { color: '#fff' },
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    }
+                }
+            }
+        });
+
+        // Format bytes
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        // Format timestamp
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString();
+        }
+
+        // Update metrics
+        function updateMetrics() {
+            fetch('/api/metrics')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('totalPackets').textContent = data.total_packets.toLocaleString();
+                    document.getElementById('packetsPerSec').textContent = data.packets_per_sec;
+                    document.getElementById('connectionsPerSec').textContent = data.connections_per_sec;
+                    document.getElementById('uniqueIps').textContent = data.unique_ips;
+                    document.getElementById('synPackets').textContent = data.syn_packets.toLocaleString();
+                    document.getElementById('udpPackets').textContent = data.udp_packets.toLocaleString();
+                    document.getElementById('totalBytes').textContent = formatBytes(data.total_bytes);
+                    document.getElementById('attacksCount').textContent = data.attacks_detected.length;
+                    document.getElementById('lastUpdate').textContent = formatTime(data.timestamp);
+
+                    // Update chart
+                    const now = new Date().toLocaleTimeString();
+                    packetData.labels.push(now);
+                    packetData.datasets[0].data.push(data.packets_per_sec);
+                    
+                    // Keep last 60 data points
+                    if (packetData.labels.length > 60) {
+                        packetData.labels.shift();
+                        packetData.datasets[0].data.shift();
+                    }
+                    packetChart.update('none');
+                });
+        }
+
+        // Update attacks
+        function updateAttacks() {
+            fetch('/api/attacks')
+                .then(res => res.json())
+                .then(data => {
+                    // Recent attacks feed
+                    const feed = document.getElementById('attacksFeed');
+                    if (data.recent.length === 0) {
+                        feed.innerHTML = '<div class="loading pulse">No attacks detected</div>';
+                    } else {
+                        feed.innerHTML = data.recent.slice(-10).reverse().map(attack => `
+                            <div class="attack-item">
+                                <div class="time">${formatTime(attack.timestamp)}</div>
+                                <div class="details">
+                                    ${attack.type} from ${attack.source}${attack.destination ? ' → ' + attack.destination : ''} 
+                                    (${attack.value} conn/s)
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+
+                    // Top attackers table
+                    const table = document.getElementById('topAttackersTable');
+                    if (data.top_attackers.length === 0) {
+                        table.innerHTML = '<tr><td colspan="6" class="loading pulse">No attackers detected</td></tr>';
+                    } else {
+                        table.innerHTML = data.top_attackers.map((attacker, idx) => `
+                            <tr>
+                                <td>${idx + 1}</td>
+                                <td><span class="ip-link" onclick="showWhois('${attacker.ip}')">${attacker.ip}</span></td>
+                                <td>${attacker.count}</td>
+                                <td>${attacker.types.join(', ')}</td>
+                                <td>${attacker.destination}</td>
+                                <td>${formatTime(attacker.last_seen)}</td>
+                            </tr>
+                        `).join('');
+                    }
+                });
+        }
+
+        // Update system status
+        function updateSystem() {
+            fetch('/api/system')
+                .then(res => res.json())
+                .then(data => {
+                    const badge = document.getElementById('serviceStatus');
+                    if (data.service_status === 'active') {
+                        badge.textContent = 'Active';
+                        badge.className = 'status-badge status-active';
+                    } else {
+                        badge.textContent = 'Inactive';
+                        badge.className = 'status-badge status-inactive';
+                    }
+                });
+        }
+
+        // WHOIS lookup
+        function showWhois(ip) {
+            const modal = document.getElementById('whoisModal');
+            const content = document.getElementById('modalContent');
+            const title = document.getElementById('modalTitle');
+            
+            title.textContent = `🔍 Investigating ${ip}`;
+            content.innerHTML = '<div class="loading pulse">Loading WHOIS data...</div>';
+            modal.style.display = 'block';
+
+            fetch(`/api/whois/${ip}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        let html = '<h3>Key Information:</h3>';
+                        for (const [key, value] of Object.entries(data.info)) {
+                            html += `<div><strong>${key}:</strong> ${value}</div>`;
+                        }
+                        html += '<h3 style="margin-top: 20px;">Raw WHOIS:</h3>';
+                        html += `<pre style="white-space: pre-wrap; font-size: 0.85em;">${data.raw}</pre>`;
+                        content.innerHTML = html;
+                    } else {
+                        content.innerHTML = `<div style="color: #ff4444;">Error: ${data.error}</div>`;
+                    }
+                });
+        }
+
+        // Close modal
+        document.querySelector('.close').onclick = function() {
+            document.getElementById('whoisModal').style.display = 'none';
+        }
+        window.onclick = function(event) {
+            const modal = document.getElementById('whoisModal');
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // Initial load
+        updateMetrics();
+        updateAttacks();
+        updateSystem();
+
+        // Auto-refresh every 5 seconds
+        setInterval(updateMetrics, 5000);
+        setInterval(updateAttacks, 5000);
+        setInterval(updateSystem, 30000);
+    </script>
+</body>
+</html>
