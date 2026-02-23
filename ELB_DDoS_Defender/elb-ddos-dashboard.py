@@ -50,74 +50,37 @@ def format_bytes(bytes_val):
 
 def create_metrics_panel(metrics):
     """Create real-time metrics display"""
-    from rich.console import Group
-    from rich.text import Text
     
-    # Traffic metrics
-    traffic_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
-    traffic_table.add_column("Metric", style="cyan")
-    traffic_table.add_column("Value", style="bold green")
+    # Single comprehensive table
+    metrics_table = Table(box=box.ROUNDED, show_header=True, padding=(0, 2))
+    metrics_table.add_column("Metric", style="cyan", width=25)
+    metrics_table.add_column("Value", style="bold green", width=20)
     
-    traffic_table.add_row("📊 Total Packets", f"{metrics['total_packets']:,}")
-    traffic_table.add_row("📈 Packets/sec", f"{metrics.get('packets_per_sec', 0):,}")
-    traffic_table.add_row("🔗 Connections/sec", f"{metrics['connections_per_sec']:,}")
-    traffic_table.add_row("💾 Total Traffic", format_bytes(metrics['total_bytes']))
-    traffic_table.add_row("🌐 Unique IPs", f"{metrics['unique_ips']:,}")
+    metrics_table.add_row("📊 Total Packets", f"{metrics['total_packets']:,}")
+    metrics_table.add_row("📈 Packets/sec", f"{metrics.get('packets_per_sec', 0):,}")
+    metrics_table.add_row("🔗 Connections/sec", f"{metrics['connections_per_sec']:,}")
+    metrics_table.add_row("💾 Total Traffic", format_bytes(metrics['total_bytes']))
+    metrics_table.add_row("🌐 Unique IPs", f"{metrics['unique_ips']:,}")
+    metrics_table.add_row("🔵 SYN Packets", f"{metrics['syn_packets']:,}")
+    metrics_table.add_row("🟣 UDP Packets", f"{metrics['udp_packets']:,}")
     
-    # Protocol breakdown
-    protocol_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
-    protocol_table.add_column("Protocol", style="yellow")
-    protocol_table.add_column("Count", style="bold")
-    
-    protocol_table.add_row("SYN Packets", f"{metrics['syn_packets']:,}")
-    protocol_table.add_row("UDP Packets", f"{metrics['udp_packets']:,}")
-    
-    # Connection rate meter
-    conn_rate = metrics['connections_per_sec']
-    threshold = 1000
-    conn_percent = min(100, (conn_rate / threshold) * 100)
-    
-    meter_bar = "█" * int(conn_percent / 5) + "░" * (20 - int(conn_percent / 5))
-    meter_color = "green" if conn_rate < 500 else "yellow" if conn_rate < 800 else "red"
-    
-    meter_text = Text()
-    meter_text.append(meter_bar, style=meter_color)
-    meter_text.append(f" {conn_rate}/{threshold} conn/s")
-    
-    # Attacks
+    # Attacks section
     attacks = metrics.get('attacks_detected', [])
     recent_attacks = attacks[-5:] if attacks else []
     
-    # Build content as Group
-    content_parts = [
-        Text("Real-time Traffic Metrics", style="bold cyan"),
-        Text(""),
-        traffic_table,
-        Text(""),
-        Text("Protocol Analysis", style="bold yellow"),
-        Text(""),
-        protocol_table,
-        Text(""),
-        Text("Connection Rate Monitor", style="bold"),
-        meter_text,
-    ]
-    
     if recent_attacks:
-        content_parts.append(Text(""))
-        content_parts.append(Text("⚠️  RECENT ATTACKS:", style="bold red"))
+        metrics_table.add_row("", "")  # Spacer
+        metrics_table.add_row("⚠️  RECENT ATTACKS", f"{len(attacks)} total")
         for attack in recent_attacks:
             src = attack['source']
             dest = attack.get('destination', '')
             route = f"{src} → {dest}" if dest else src
-            content_parts.append(Text(f"  • {attack['type']} from {route} ({attack['value']} conn/s)"))
+            metrics_table.add_row(f"  {attack['type']}", f"{route} ({attack['value']}/s)")
     else:
-        content_parts.append(Text(""))
-        content_parts.append(Text("✓ No attacks detected", style="green"))
+        metrics_table.add_row("", "")
+        metrics_table.add_row("✓ Status", "No attacks detected")
     
-    content_parts.append(Text(""))
-    content_parts.append(Text(f"Last updated: {metrics.get('timestamp', 'N/A')}", style="dim"))
-    
-    return Panel(Group(*content_parts), title="📡 Live Monitoring", border_style="cyan")
+    return Panel(metrics_table, title="📡 Live Monitoring", border_style="cyan")
 
 def create_dashboard():
     """Create main dashboard layout"""
