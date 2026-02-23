@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Full Visual Dashboard with Rich Widgets"""
+"""Visual Dashboard with Menu at Bottom"""
 import json
 import time
+import os
+import sys
+import boto3
+import subprocess
 from datetime import datetime
 from rich.console import Console
 from rich.layout import Layout
@@ -9,8 +13,17 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.live import Live
 from rich import box
+from rich.text import Text
 
 console = Console()
+
+# AWS clients
+elbv2 = boto3.client('elbv2', region_name='us-east-1')
+ec2 = boto3.client('ec2', region_name='us-east-1')
+
+# Global state
+current_menu_option = None
+menu_active = False
 
 def load_metrics():
     try:
@@ -30,7 +43,6 @@ def load_metrics():
         }
 
 def create_metrics_panel(metrics):
-    """Top panel - Main metrics"""
     table = Table(box=box.ROUNDED, show_header=False, expand=True)
     table.add_column("Metric", style="cyan", width=25)
     table.add_column("Value", style="bold green", width=20)
@@ -44,7 +56,6 @@ def create_metrics_panel(metrics):
     return Panel(table, title="[bold blue]📊 LIVE TRAFFIC METRICS[/bold blue]", border_style="blue")
 
 def create_protocol_panel(metrics):
-    """Protocol breakdown panel"""
     table = Table(box=box.ROUNDED, show_header=False, expand=True)
     table.add_column("Protocol", style="yellow", width=20)
     table.add_column("Count", style="bold magenta", width=15)
@@ -55,7 +66,6 @@ def create_protocol_panel(metrics):
     return Panel(table, title="[bold yellow]🔵 PROTOCOL BREAKDOWN[/bold yellow]", border_style="yellow")
 
 def create_attacks_panel(metrics):
-    """Attacks panel"""
     attacks = metrics.get('attacks_detected', [])
     
     if not attacks:
@@ -66,7 +76,7 @@ def create_attacks_panel(metrics):
         table.add_column("Source → Target", style="white", width=35)
         table.add_column("Count", style="yellow", width=10)
         
-        for attack in attacks[-5:]:  # Last 5 attacks
+        for attack in attacks[-5:]:
             atype = attack.get('type', 'Unknown')
             src = attack.get('source', 'N/A')
             dst = attack.get('destination', 'N/A')
@@ -80,12 +90,11 @@ def create_attacks_panel(metrics):
     return Panel(content, title=title, border_style="red")
 
 def create_activity_panel(metrics):
-    """Recent activity log"""
     attacks = metrics.get('attacks_detected', [])
     
     lines = []
     if attacks:
-        for attack in attacks[-10:]:  # Last 10
+        for attack in attacks[-10:]:
             timestamp = attack.get('timestamp', 'N/A')
             atype = attack.get('type', 'Unknown')
             src = attack.get('source', 'N/A')
@@ -94,48 +103,50 @@ def create_activity_panel(metrics):
     else:
         lines.append("[green]No recent activity[/green]")
     
-    content = "\n".join(lines[-8:])  # Show last 8 lines
+    content = "\n".join(lines[-8:])
     
     return Panel(content, title="[bold cyan]📝 RECENT ACTIVITY[/bold cyan]", border_style="cyan")
 
-def create_status_panel(metrics):
-    """System status"""
-    timestamp = metrics.get('timestamp', 'N/A')
+def create_menu_panel():
+    """Menu at bottom"""
+    menu_text = Text()
+    menu_text.append("MENU: ", style="bold white")
+    menu_text.append("[1]", style="bold cyan")
+    menu_text.append(" Setup ELB  ", style="white")
+    menu_text.append("[2]", style="bold cyan")
+    menu_text.append(" View ELBs  ", style="white")
+    menu_text.append("[3]", style="bold cyan")
+    menu_text.append(" VPC Status  ", style="white")
+    menu_text.append("[4]", style="bold cyan")
+    menu_text.append(" Logs  ", style="white")
+    menu_text.append("[5]", style="bold cyan")
+    menu_text.append(" Attacks  ", style="white")
+    menu_text.append("[6]", style="bold cyan")
+    menu_text.append(" Report  ", style="white")
+    menu_text.append("[7]", style="bold cyan")
+    menu_text.append(" Exit", style="white")
     
-    table = Table(box=box.SIMPLE, show_header=False, expand=True)
-    table.add_column("", style="dim", width=20)
-    table.add_column("", style="white", width=30)
-    
-    table.add_row("🟢 Status", "[green]MONITORING ACTIVE[/green]")
-    table.add_row("⏰ Last Update", timestamp)
-    table.add_row("🎯 Mode", "Real-time Analysis")
-    
-    return Panel(table, title="[bold green]⚙️  SYSTEM STATUS[/bold green]", border_style="green")
+    return Panel(menu_text, title="[bold green]⚙️  NAVIGATION MENU[/bold green]", border_style="green")
 
 def create_dashboard():
-    """Create full dashboard layout"""
     layout = Layout()
     
-    # Split into top and bottom
     layout.split_column(
         Layout(name="header", size=3),
-        Layout(name="main"),
-        Layout(name="footer", size=3)
+        Layout(name="main", ratio=3),
+        Layout(name="menu", size=3)
     )
     
-    # Split main into left and right
     layout["main"].split_row(
         Layout(name="left", ratio=2),
         Layout(name="right", ratio=1)
     )
     
-    # Split left into top and bottom
     layout["left"].split_column(
         Layout(name="metrics"),
         Layout(name="attacks")
     )
     
-    # Split right into top and bottom
     layout["right"].split_column(
         Layout(name="protocol"),
         Layout(name="activity")
@@ -144,10 +155,8 @@ def create_dashboard():
     return layout
 
 def update_dashboard(layout):
-    """Update all panels with current data"""
     metrics = load_metrics()
     
-    # Header
     layout["header"].update(
         Panel(
             "[bold white]ELB DDoS DEFENDER - LIVE MONITORING DASHBOARD[/bold white]",
@@ -155,23 +164,17 @@ def update_dashboard(layout):
         )
     )
     
-    # Main panels
     layout["metrics"].update(create_metrics_panel(metrics))
     layout["protocol"].update(create_protocol_panel(metrics))
     layout["attacks"].update(create_attacks_panel(metrics))
     layout["activity"].update(create_activity_panel(metrics))
-    
-    # Footer
-    layout["footer"].update(
-        Panel(
-            "[dim]Press Ctrl+C to exit | Updates every 2 seconds[/dim]",
-            style="dim white on black"
-        )
-    )
+    layout["menu"].update(create_menu_panel())
 
 def main():
-    """Run live dashboard"""
     layout = create_dashboard()
+    
+    console.print("[yellow]Starting dashboard... Press Ctrl+C to access menu[/yellow]")
+    time.sleep(2)
     
     try:
         with Live(layout, refresh_per_second=0.5, screen=True):
@@ -179,7 +182,42 @@ def main():
                 update_dashboard(layout)
                 time.sleep(2)
     except KeyboardInterrupt:
-        console.print("\n[yellow]Dashboard stopped[/yellow]")
+        console.print("\n[green]Menu activated![/green]")
+        show_menu()
+
+def show_menu():
+    """Show interactive menu"""
+    os.system('clear')
+    while True:
+        print("=" * 80)
+        print("                    ELB DDoS DEFENDER - MENU")
+        print("=" * 80)
+        print("\n1. 🎯 Select ELB & Setup Traffic Mirroring")
+        print("2. 🔵 View All Load Balancers (Detailed)")
+        print("3. 🌐 View VPC & Traffic Mirroring Status")
+        print("4. 📝 View Logs")
+        print("5. 🚨 View Detected Attacks (with WHOIS)")
+        print("6. 📄 Generate Report")
+        print("7. 🔄 Exit")
+        print("\n" + "=" * 80)
+        
+        choice = input("\nSelect option (1-7, or 'v' for visual dashboard): ").strip()
+        
+        if choice == 'v':
+            main()
+            return
+        elif choice == '7':
+            print("\nExiting...")
+            sys.exit(0)
+        elif choice in ['1', '2', '3', '4', '5', '6']:
+            print(f"\n⚙️  Option {choice} - Feature available in dashboard-complete.py")
+            print("Run: python3.11 /opt/elb-ddos-defender/dashboard-complete.py")
+            input("\nPress Enter to continue...")
+        else:
+            print("\n❌ Invalid option")
+            input("Press Enter to continue...")
+        
+        os.system('clear')
 
 if __name__ == '__main__':
     main()
