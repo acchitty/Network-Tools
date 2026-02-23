@@ -29,12 +29,23 @@ class TrafficMonitor:
             'connections_per_sec': 0,
             'unique_ips': set(),
             'syn_packets': 0,
+            'ack_packets': 0,
             'udp_packets': 0,
             'attacks_detected': []
         }
         self.connection_tracker = defaultdict(lambda: deque(maxlen=1000))
         self.packet_times = deque(maxlen=10000)
+        self.udp_times = deque(maxlen=5000)
+        self.syn_times = deque(maxlen=5000)
+        self.bytes_history = deque(maxlen=60)  # Last 60 seconds
         self.running = True
+        
+        # Thresholds from config
+        self.syn_flood_threshold = config.get('thresholds', {}).get('syn_flood_ratio', 3.0)  # SYN:ACK ratio
+        self.udp_flood_threshold = config.get('thresholds', {}).get('udp_packets_per_sec', 1000)
+        self.packet_rate_threshold = config.get('thresholds', {}).get('packets_per_sec', 5000)
+        self.bandwidth_threshold = config.get('thresholds', {}).get('bytes_per_sec', 10000000)  # 10 MB/s
+        self.multi_source_threshold = config.get('thresholds', {}).get('multi_source_ips', 50)  # 50 IPs attacking
         
     def analyze_packet(self, packet):
         """Analyze individual packet for threats"""
@@ -44,8 +55,11 @@ class TrafficMonitor:
             self.stats['total_packets'] += 1
             
             # Get packet size
+            packet_size = 0
             if hasattr(packet, 'length'):
-                self.stats['total_bytes'] += int(packet.length)
+                packet_size = int(packet.length)
+                self.stats['total_bytes'] += packet_size
+                self.bytes_history.append((timestamp, packet_size))
             
             # IP layer analysis
             if hasattr(packet, 'ip'):
@@ -69,10 +83,15 @@ class TrafficMonitor:
                     # SYN flag (0x02)
                     if flags & 0x02:
                         self.stats['syn_packets'] += 1
+                        self.syn_times.append(timestamp)
+                    # ACK flag (0x10)
+                    if flags & 0x10:
+                        self.stats['ack_packets'] += 1
             
             # UDP analysis
             if hasattr(packet, 'udp'):
                 self.stats['udp_packets'] += 1
+                self.udp_times.append(timestamp)
                 
         except Exception as e:
             logger.debug(f"Packet analysis error: {e}")
@@ -105,7 +124,59 @@ class TrafficMonitor:
         self.stats['connections_per_sec'] = total_recent_conns
         self.stats['packets_per_sec'] = pps
         
+        # Run DDoS detection checks
+        self.check_syn_flood(now)
+        self.check_udp_flood(now)
+        self.check_packet_rate_spike(pps)
+        self.check_bandwidth_spike(now)
+        self.check_multi_source_attack(now)
+        
         return self.stats
+    
+    def check_syn_flood(self, now):
+        """Detect SYN flood - high SYN:ACK ratio"""
+        recent_syns = [t for t in self.syn_times if now - t < 5.0]
+        syn_count = len(recent_syns)
+        ack_count = self.stats['ack_packets']
+        
+        if syn_count > 100 and ack_count > 0:
+            ratio = syn_count / ack_count
+            if ratio > self.syn_flood_threshold:
+                self.detect_attack('syn_flood', 'multiple_sources', f"SYN:ACK ratio {ratio:.1f}:1")
+    
+    def check_udp_flood(self, now):
+        """Detect UDP flood - excessive UDP packets"""
+        recent_udp = [t for t in self.udp_times if now - t < 1.0]
+        udp_per_sec = len(recent_udp)
+        
+        if udp_per_sec > self.udp_flood_threshold:
+            self.detect_attack('udp_flood', 'multiple_sources', f"{udp_per_sec} UDP/s")
+    
+    def check_packet_rate_spike(self, pps):
+        """Detect packet rate spike"""
+        if pps > self.packet_rate_threshold:
+            self.detect_attack('packet_rate_spike', 'multiple_sources', f"{pps} packets/s")
+    
+    def check_bandwidth_spike(self, now):
+        """Detect bandwidth spike"""
+        # Calculate bytes in last second
+        recent_bytes = sum(size for ts, size in self.bytes_history if now - ts < 1.0)
+        
+        if recent_bytes > self.bandwidth_threshold:
+            mb_per_sec = recent_bytes / 1024 / 1024
+            self.detect_attack('bandwidth_spike', 'multiple_sources', f"{mb_per_sec:.1f} MB/s")
+    
+    def check_multi_source_attack(self, now):
+        """Detect coordinated multi-source attack"""
+        # Count IPs with recent activity
+        active_attackers = 0
+        for ip, times in self.connection_tracker.items():
+            recent = [t for t in times if now - t < 5.0]
+            if len(recent) > 50:  # IP making >50 connections in 5 seconds
+                active_attackers += 1
+        
+        if active_attackers >= self.multi_source_threshold:
+            self.detect_attack('multi_source_ddos', f"{active_attackers}_ips", f"{active_attackers} attacking IPs")
     
     def start_capture(self, interface='ens5'):
         """Start packet capture"""
