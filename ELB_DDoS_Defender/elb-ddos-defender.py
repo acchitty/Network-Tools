@@ -107,7 +107,7 @@ class TrafficMonitor:
         
         return self.stats
     
-    def start_capture(self, interface='eth0'):
+    def start_capture(self, interface='ens5'):
         """Start packet capture"""
         logger.info(f"Starting packet capture on {interface}")
         
