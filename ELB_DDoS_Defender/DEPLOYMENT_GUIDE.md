@@ -1,8 +1,35 @@
 # ELB DDoS Defender - Complete Deployment Guide
 
-**Version 2.1 - Web Dashboard with Live Charts**
+**Version 2.2 - Production Ready**
 
-## What's New in v2.1 ✨
+## Instance Requirements ⚠️ CRITICAL
+
+**Minimum Instance Type:** r6i.xlarge
+- **vCPU:** 4
+- **RAM:** 32GB
+- **Cost:** ~$182/month
+- **Why:** Real-time packet capture with PyShark is CPU and memory intensive. Smaller instances (t3.micro, t3.small) will be slow and laggy.
+
+**Storage:** 20GB+ EBS (gp3 recommended)
+
+**Network:** Must be in same VPC as your load balancers
+
+## What's New in v2.2 ✨
+
+### Core Features
+- 🔍 **VXLAN Packet Decoding** - Extracts real client IPs from VPC Traffic Mirror
+- 🎯 **6 DDoS Detection Types** - SYN flood, UDP flood, connection flood, packet rate spike, bandwidth spike, multi-source attacks
+- 📊 **Dual Dashboards** - Terminal (Rich UI) and Web (Flask + Chart.js)
+- 🌐 **Web Dashboard** - Live charts, auto-refresh, WHOIS lookup
+- 🔎 **IP Investigation** - WHOIS, MTR, reverse DNS for attacking IPs
+- 📍 **From → To Tracking** - Shows attack source and destination
+- ⚡ **Real-time Metrics** - Updates every 1-5 seconds
+
+### Technical Improvements
+- Only processes VXLAN mirrored traffic (filters out defender's own packets)
+- Proper IP direction detection (client → ALB)
+- Thread-safe metrics export
+- Optimized for high packet rates
 - 🌐 **Web Dashboard** - Access from any browser with live charts
 - 📊 **Real-time graphs** - Packet rate visualization (last 60 seconds)
 - 🔍 **Click-to-investigate** - WHOIS lookup for attacking IPs
@@ -21,31 +48,30 @@
 
 ## 🚀 Quick Start (5 Minutes)
 
+### Prerequisites
+- AWS Account with permissions for EC2, ELB, VPC
+- **r6i.xlarge instance** (or larger) - DO NOT use t3.micro/small
+- VPC with load balancers to monitor
+- SSH key pair
+
 ### Choose Your Deployment Method
 
-**Option A: Automated (5 min)**
+**Option A: Automated Script (Recommended)**
 ```bash
+# Launch r6i.xlarge instance first, then:
 curl -sSL https://raw.githubusercontent.com/acchitty/Network-Tools/main/ELB_DDoS_Defender/install.sh | sudo bash
 ```
 
-**Option D: Terraform Interactive (5 min)**
-```bash
-cd terraform/ && ./setup.sh
-```
+**Option B: Manual Installation**
+See [Method B: Manual Installation](#method-b-manual-installation) below
 
-**Option C: CloudFormation Interactive (10 min)**
-```bash
-cd cloudformation/ && ./setup.sh
-```
-
-**All methods now include:**
-- ✅ Interactive VPC/subnet/key selection
-- ✅ Resource discovery and listing
-- ✅ Configuration validation
-- ✅ Automatic deployment
-- 🌐 **Web dashboard on port 5000**
-
-**See all options:** `DEPLOYMENT_OPTIONS.md`
+**All methods include:**
+- ✅ Real-time packet capture with TShark
+- ✅ 6 DDoS detection types
+- ✅ Terminal dashboard (Rich UI)
+- ✅ Web dashboard (port 8080)
+- ✅ VPC Traffic Mirroring setup
+- ✅ WHOIS/MTR investigation tools
 
 ---
 
