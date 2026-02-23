@@ -20,23 +20,51 @@ elbv2 = boto3.client('elbv2', region_name='us-east-1')
 ec2 = boto3.client('ec2', region_name='us-east-1')
 
 def show_metrics():
-    """Display live metrics"""
-    clear()
-    metrics = load_metrics()
-    print("=" * 80)
-    print("                    📊 LIVE METRICS")
-    print("=" * 80)
-    print(f"\nTotal Packets:        {metrics.get('total_packets', 0):,}")
-    print(f"Total Traffic:        {metrics.get('total_bytes', 0) / 1024 / 1024:.2f} MB")
-    print(f"Unique IPs:           {metrics.get('unique_ips', 0):,}")
-    print(f"Packets/sec:          {metrics.get('packets_per_sec', 0)}")
-    print(f"Connections/sec:      {metrics.get('connections_per_sec', 0)}")
-    print(f"\nSYN Packets:          {metrics.get('syn_packets', 0):,}")
-    print(f"UDP Packets:          {metrics.get('udp_packets', 0):,}")
-    print(f"\nAttacks Detected:     {len(metrics.get('attacks_detected', []))}")
-    print(f"Last Updated:         {metrics.get('timestamp', 'N/A')}")
-    print("\n" + "=" * 80)
-    input("\nPress Enter to continue...")
+    """Display live metrics with auto-refresh"""
+    import time
+    import subprocess
+    
+    print("\n🔴 Starting Live Monitor (Press Ctrl+C to exit)...\n")
+    time.sleep(2)
+    
+    try:
+        while True:
+            clear()
+            metrics = load_metrics()
+            print("=" * 80)
+            print("              📊 LIVE METRICS (Auto-Refresh Every 2s)")
+            print("=" * 80)
+            print(f"\n📦 TRAFFIC STATISTICS")
+            print(f"   Total Packets:        {metrics.get('total_packets', 0):,}")
+            print(f"   Total Traffic:        {metrics.get('total_bytes', 0) / 1024 / 1024:.2f} MB")
+            print(f"   Unique IPs:           {metrics.get('unique_ips', 0):,}")
+            print(f"   Packets/sec:          {metrics.get('packets_per_sec', 0)}")
+            print(f"   Connections/sec:      {metrics.get('connections_per_sec', 0)}")
+            
+            print(f"\n🔵 PROTOCOL BREAKDOWN")
+            print(f"   TCP SYN Packets:      {metrics.get('syn_packets', 0):,}")
+            print(f"   UDP Packets:          {metrics.get('udp_packets', 0):,}")
+            
+            attacks = metrics.get('attacks_detected', [])
+            print(f"\n🚨 ATTACKS DETECTED: {len(attacks)}")
+            if attacks:
+                print(f"\n   Recent Attacks:")
+                for attack in attacks[-5:]:
+                    src = attack.get('source', 'N/A')
+                    dst = attack.get('destination', 'N/A')
+                    atype = attack.get('type', 'Unknown')
+                    print(f"   • {atype}: {src} → {dst}")
+            else:
+                print(f"   ✅ No attacks detected")
+            
+            print(f"\n⏰ Last Updated: {metrics.get('timestamp', 'N/A')}")
+            print("=" * 80)
+            print("\nPress Ctrl+C to return to menu")
+            
+            time.sleep(2)
+    except KeyboardInterrupt:
+        print("\n\nReturning to menu...")
+        time.sleep(1)
 
 def show_all_load_balancers():
     """Show ALL load balancers with complete details"""
@@ -165,26 +193,81 @@ def show_logs():
     input("\nPress Enter to continue...")
 
 def show_attacks():
-    """Show detected attacks with details"""
+    """Show detected attacks with WHOIS lookup"""
+    import subprocess
+    
     clear()
     metrics = load_metrics()
     attacks = metrics.get('attacks_detected', [])
     
     print("=" * 80)
-    print("                🚨 DETECTED ATTACKS (Last 20)")
+    print("            🚨 DETECTED ATTACKS WITH SOURCE TRACING")
     print("=" * 80)
     
     if not attacks:
         print("\n✅ No attacks detected")
-    else:
-        for i, attack in enumerate(attacks[-20:], 1):
-            print(f"\n[{i}] {attack.get('timestamp', 'N/A')}")
-            print(f"    Type:        {attack.get('type', 'Unknown')}")
-            print(f"    Source IP:   {attack.get('source', 'N/A')}")
-            print(f"    Target IP:   {attack.get('destination', 'N/A')}")
-            print(f"    Packet Count: {attack.get('count', 'N/A')}")
+        print("\n" + "=" * 80)
+        input("\nPress Enter to continue...")
+        return
+    
+    # Show attacks
+    for i, attack in enumerate(attacks[-20:], 1):
+        src = attack.get('source', 'N/A')
+        dst = attack.get('destination', 'N/A')
+        atype = attack.get('type', 'Unknown')
+        timestamp = attack.get('timestamp', 'N/A')
+        count = attack.get('count', 'N/A')
+        
+        print(f"\n[{i}] {timestamp}")
+        print(f"    Type:         {atype}")
+        print(f"    Source IP:    {src}")
+        print(f"    Target IP:    {dst}")
+        print(f"    Packet Count: {count}")
+        print(f"    Direction:    {src} → {dst}")
     
     print("\n" + "=" * 80)
+    
+    # Ask to investigate
+    investigate = input("\nInvestigate an attack? Enter number (or press Enter to skip): ").strip()
+    
+    if investigate.isdigit():
+        idx = int(investigate) - 1
+        if 0 <= idx < len(attacks[-20:]):
+            attack = attacks[-20:][idx]
+            src_ip = attack.get('source', '')
+            
+            if src_ip and src_ip != 'N/A':
+                print(f"\n🔍 Investigating {src_ip}...")
+                print("=" * 80)
+                
+                # WHOIS lookup
+                print("\n📋 WHOIS Information:")
+                try:
+                    result = subprocess.run(['whois', src_ip], capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0:
+                        lines = result.stdout.split('\n')
+                        # Show relevant lines
+                        for line in lines[:30]:
+                            if any(keyword in line.lower() for keyword in ['country', 'netname', 'org', 'descr', 'address', 'inetnum']):
+                                print(f"   {line}")
+                    else:
+                        print("   ❌ WHOIS lookup failed")
+                except:
+                    print("   ❌ WHOIS not available")
+                
+                # DNS lookup
+                print("\n🌐 DNS Reverse Lookup:")
+                try:
+                    result = subprocess.run(['dig', '-x', src_ip, '+short'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0 and result.stdout.strip():
+                        print(f"   Hostname: {result.stdout.strip()}")
+                    else:
+                        print("   No PTR record found")
+                except:
+                    print("   ❌ DNS lookup not available")
+                
+                print("\n" + "=" * 80)
+    
     input("\nPress Enter to continue...")
 
 def select_and_setup_elb():
@@ -406,6 +489,98 @@ def setup_traffic_mirror(source_enis):
     print("=" * 80)
     input("\nPress Enter to continue...")
 
+def generate_report():
+    """Generate comprehensive report"""
+    clear()
+    print("=" * 80)
+    print("                📄 GENERATE REPORT")
+    print("=" * 80)
+    
+    metrics = load_metrics()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"/tmp/ddos_report_{timestamp}.txt"
+    
+    print(f"\n📝 Generating report...")
+    
+    try:
+        with open(filename, 'w') as f:
+            f.write("=" * 80 + "\n")
+            f.write("           ELB DDoS DEFENDER - SECURITY REPORT\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Report Period: Last monitoring session\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("TRAFFIC SUMMARY\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"Total Packets Analyzed:    {metrics.get('total_packets', 0):,}\n")
+            f.write(f"Total Traffic Volume:      {metrics.get('total_bytes', 0) / 1024 / 1024:.2f} MB\n")
+            f.write(f"Unique Source IPs:         {metrics.get('unique_ips', 0):,}\n")
+            f.write(f"TCP SYN Packets:           {metrics.get('syn_packets', 0):,}\n")
+            f.write(f"UDP Packets:               {metrics.get('udp_packets', 0):,}\n")
+            
+            attacks = metrics.get('attacks_detected', [])
+            f.write("\n" + "=" * 80 + "\n")
+            f.write(f"SECURITY INCIDENTS: {len(attacks)}\n")
+            f.write("=" * 80 + "\n")
+            
+            if attacks:
+                for i, attack in enumerate(attacks, 1):
+                    f.write(f"\n[Incident #{i}]\n")
+                    f.write(f"  Timestamp:     {attack.get('timestamp', 'N/A')}\n")
+                    f.write(f"  Attack Type:   {attack.get('type', 'Unknown')}\n")
+                    f.write(f"  Source IP:     {attack.get('source', 'N/A')}\n")
+                    f.write(f"  Target IP:     {attack.get('destination', 'N/A')}\n")
+                    f.write(f"  Packet Count:  {attack.get('count', 'N/A')}\n")
+                    f.write(f"  Direction:     {attack.get('source', 'N/A')} → {attack.get('destination', 'N/A')}\n")
+            else:
+                f.write("\n✅ No security incidents detected during monitoring period.\n")
+            
+            # Load balancer info
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("MONITORED LOAD BALANCERS\n")
+            f.write("=" * 80 + "\n")
+            
+            try:
+                response = elbv2.describe_load_balancers()
+                for lb in response['LoadBalancers']:
+                    f.write(f"\nLoad Balancer: {lb['LoadBalancerName']}\n")
+                    f.write(f"  Type: {lb['Type']}\n")
+                    f.write(f"  DNS:  {lb['DNSName']}\n")
+                    f.write(f"  VPC:  {lb['VpcId']}\n")
+            except:
+                f.write("\nUnable to retrieve load balancer information.\n")
+            
+            # Traffic mirroring status
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("TRAFFIC MIRRORING STATUS\n")
+            f.write("=" * 80 + "\n")
+            
+            try:
+                sessions = ec2.describe_traffic_mirror_sessions()
+                f.write(f"\nActive Mirror Sessions: {len(sessions['TrafficMirrorSessions'])}\n")
+                for session in sessions['TrafficMirrorSessions']:
+                    f.write(f"\n  Session: {session['TrafficMirrorSessionId']}\n")
+                    f.write(f"    Source ENI: {session['NetworkInterfaceId']}\n")
+                    f.write(f"    Target:     {session['TrafficMirrorTargetId']}\n")
+            except:
+                f.write("\nUnable to retrieve traffic mirroring status.\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("END OF REPORT\n")
+            f.write("=" * 80 + "\n")
+        
+        print(f"✅ Report generated successfully!")
+        print(f"\n📁 Location: {filename}")
+        print(f"\n💡 You can download this file using:")
+        print(f"   scp -i your-key.pem ec2-user@<instance-ip>:{filename} .")
+        
+    except Exception as e:
+        print(f"❌ Error generating report: {e}")
+    
+    print("\n" + "=" * 80)
+    input("\nPress Enter to continue...")
+
 def main_menu():
     """Main menu with all options"""
     while True:
@@ -415,15 +590,16 @@ def main_menu():
         print("                   COMPLETE DASHBOARD")
         print("=" * 80)
         print("\n1. 🎯 Select ELB & Setup Traffic Mirroring")
-        print("2. 📊 View Live Metrics")
+        print("2. 📊 View Live Metrics (Auto-Refresh)")
         print("3. 🔵 View All Load Balancers (Detailed)")
         print("4. 🌐 View VPC & Traffic Mirroring Status")
         print("5. 📝 View Logs")
-        print("6. 🚨 View Detected Attacks")
-        print("7. 🔄 Exit")
+        print("6. 🚨 View Detected Attacks (with WHOIS)")
+        print("7. 📄 Generate Report")
+        print("8. 🔄 Exit")
         print("\n" + "=" * 80)
         
-        choice = input("\nSelect option (1-7): ").strip()
+        choice = input("\nSelect option (1-8): ").strip()
         
         if choice == '1':
             select_and_setup_elb()
@@ -438,6 +614,8 @@ def main_menu():
         elif choice == '6':
             show_attacks()
         elif choice == '7':
+            generate_report()
+        elif choice == '8':
             print("\nExiting...")
             break
         else:
