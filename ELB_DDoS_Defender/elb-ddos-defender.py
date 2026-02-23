@@ -71,32 +71,37 @@ class TrafficMonitor:
             if hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport') and packet.udp.dstport == '4789':
                 is_vxlan = True
             
+            # ONLY process VXLAN packets (mirrored traffic)
+            # Skip defender's own traffic
+            if not is_vxlan:
+                continue
+            
             # Get all IP layers
             ip_layers = []
             for layer in packet.layers:
                 if layer.layer_name == 'ip':
                     ip_layers.append(layer)
             
-            if is_vxlan and len(ip_layers) >= 2:
+            if len(ip_layers) >= 2:
                 # VXLAN packet: Use INNER IP (last IP layer)
-                # Structure: Outer IP (ALB ENI) → VXLAN → Inner IP (Real Client)
+                # Structure: Outer IP (ALB ENI) → VXLAN → Inner IP (Real Client → ALB)
                 inner_ip = ip_layers[-1]  # Last IP layer is the real packet
                 
-                # For mirrored traffic, the direction might be reversed
-                # Check which IP is the real client (not 10.0.x.x)
+                # For mirrored traffic from ALB:
+                # Inner packet shows: Client IP → ALB ENI IP
                 if hasattr(inner_ip, 'src') and hasattr(inner_ip, 'dst'):
                     inner_src = inner_ip.src
                     inner_dst = inner_ip.dst
                     
-                    # If src is 10.0.x.x (defender/ALB), swap them
-                    if inner_src.startswith('10.0.') and not inner_dst.startswith('10.0.'):
-                        # Reversed: dst is actually the real client
-                        src_ip = inner_dst
-                        dst_ip = inner_src
-                    elif not inner_src.startswith('10.0.'):
+                    # Real client is the one NOT in 10.0.x.x range
+                    if not inner_src.startswith('10.0.') and not inner_src.startswith('169.254.'):
                         # Normal: src is the real client
                         src_ip = inner_src
                         dst_ip = inner_dst
+                    elif not inner_dst.startswith('10.0.') and not inner_dst.startswith('169.254.'):
+                        # Reversed: dst is the real client (response packet)
+                        src_ip = inner_dst
+                        dst_ip = inner_src
                     else:
                         # Both are 10.0.x.x, skip
                         src_ip = None
