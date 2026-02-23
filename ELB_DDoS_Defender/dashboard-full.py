@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Full Featured Dashboard for ELB DDoS Defender"""
 import json
-import subprocess
 import os
 from datetime import datetime
+import boto3
 
 def clear():
     os.system('clear')
@@ -15,12 +15,9 @@ def load_metrics():
     except:
         return {'total_packets': 0, 'unique_ips': 0, 'attacks_detected': []}
 
-def run_aws(cmd):
-    """Run AWS CLI command"""
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if result.returncode == 0:
-        return json.loads(result.stdout) if result.stdout else {}
-    return {}
+# AWS clients
+elbv2 = boto3.client('elbv2', region_name='us-east-1')
+ec2 = boto3.client('ec2', region_name='us-east-1')
 
 def show_metrics():
     """Display live metrics"""
@@ -45,36 +42,44 @@ def show_load_balancers():
     print("                    🔵 LOAD BALANCERS")
     print("=" * 80)
     
-    # Get ALBs
-    albs = run_aws('/usr/bin/aws elbv2 describe-load-balancers --region us-east-1')
-    
-    for lb in albs.get('LoadBalancers', []):
-        name = lb['LoadBalancerName']
-        dns = lb['DNSName']
-        lb_type = lb['Type']
-        vpc = lb['VpcId']
+    try:
+        # Get ALBs
+        response = elbv2.describe_load_balancers()
         
-        print(f"\n📌 {name} ({lb_type.upper()})")
-        print(f"   DNS: {dns}")
-        print(f"   VPC: {vpc}")
-        print(f"   Availability Zones:")
-        
-        for az in lb.get('AvailabilityZones', []):
-            zone = az['ZoneName']
-            subnet = az['SubnetId']
+        for lb in response['LoadBalancers']:
+            name = lb['LoadBalancerName']
+            dns = lb['DNSName']
+            lb_type = lb['Type']
+            vpc = lb['VpcId']
             
-            # Get ENI for this subnet
-            enis = run_aws(f'/usr/bin/aws ec2 describe-network-interfaces --region us-east-1 --filters "Name=subnet-id,Values={subnet}" "Name=description,Values=*{name}*"')
+            print(f"\n📌 {name} ({lb_type.upper()})")
+            print(f"   DNS: {dns}")
+            print(f"   VPC: {vpc}")
+            print(f"   Availability Zones:")
             
-            print(f"      {zone} (Subnet: {subnet})")
-            for eni in enis.get('NetworkInterfaces', []):
-                eni_id = eni['NetworkInterfaceId']
-                private_ip = eni.get('PrivateIpAddress', 'N/A')
-                public_ip = eni.get('Association', {}).get('PublicIp', 'None')
+            for az in lb.get('AvailabilityZones', []):
+                zone = az['ZoneName']
+                subnet = az['SubnetId']
                 
-                print(f"         ENI: {eni_id}")
-                print(f"         Private IP: {private_ip}")
-                print(f"         Public IP: {public_ip}")
+                # Get ENI for this subnet
+                eni_response = ec2.describe_network_interfaces(
+                    Filters=[
+                        {'Name': 'subnet-id', 'Values': [subnet]},
+                        {'Name': 'description', 'Values': [f'*{name}*']}
+                    ]
+                )
+                
+                print(f"      {zone} (Subnet: {subnet})")
+                for eni in eni_response.get('NetworkInterfaces', []):
+                    eni_id = eni['NetworkInterfaceId']
+                    private_ip = eni.get('PrivateIpAddress', 'N/A')
+                    public_ip = eni.get('Association', {}).get('PublicIp', 'None')
+                    
+                    print(f"         ENI: {eni_id}")
+                    print(f"         Private IP: {private_ip}")
+                    print(f"         Public IP: {public_ip}")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
     
     print("\n" + "=" * 80)
     input("\nPress Enter to continue...")
@@ -86,28 +91,31 @@ def show_vpc_info():
     print("                    🌐 VPC INFORMATION")
     print("=" * 80)
     
-    # Get VPCs
-    vpcs = run_aws('/usr/bin/aws ec2 describe-vpcs --region us-east-1')
-    for vpc in vpcs.get('Vpcs', []):
-        vpc_id = vpc['VpcId']
-        cidr = vpc['CidrBlock']
-        print(f"\n📍 VPC: {vpc_id}")
-        print(f"   CIDR: {cidr}")
-    
-    # Get Traffic Mirror Sessions
-    print("\n" + "=" * 80)
-    print("                 🔍 TRAFFIC MIRROR SESSIONS")
-    print("=" * 80)
-    
-    sessions = run_aws('/usr/bin/aws ec2 describe-traffic-mirror-sessions --region us-east-1')
-    for session in sessions.get('TrafficMirrorSessions', []):
-        session_id = session['TrafficMirrorSessionId']
-        source_eni = session['NetworkInterfaceId']
-        target_id = session['TrafficMirrorTargetId']
+    try:
+        # Get VPCs
+        vpcs = ec2.describe_vpcs()
+        for vpc in vpcs['Vpcs']:
+            vpc_id = vpc['VpcId']
+            cidr = vpc['CidrBlock']
+            print(f"\n📍 VPC: {vpc_id}")
+            print(f"   CIDR: {cidr}")
         
-        print(f"\n🔄 Session: {session_id}")
-        print(f"   Source ENI: {source_eni}")
-        print(f"   Target: {target_id}")
+        # Get Traffic Mirror Sessions
+        print("\n" + "=" * 80)
+        print("                 🔍 TRAFFIC MIRROR SESSIONS")
+        print("=" * 80)
+        
+        sessions = ec2.describe_traffic_mirror_sessions()
+        for session in sessions['TrafficMirrorSessions']:
+            session_id = session['TrafficMirrorSessionId']
+            source_eni = session['NetworkInterfaceId']
+            target_id = session['TrafficMirrorTargetId']
+            
+            print(f"\n🔄 Session: {session_id}")
+            print(f"   Source ENI: {source_eni}")
+            print(f"   Target: {target_id}")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
     
     print("\n" + "=" * 80)
     input("\nPress Enter to continue...")
@@ -119,9 +127,12 @@ def show_logs():
     print("                    📝 RECENT LOGS")
     print("=" * 80)
     
-    result = subprocess.run(['tail', '-50', '/var/log/elb-ddos-defender/defender.log'], 
-                          capture_output=True, text=True)
-    print(result.stdout if result.returncode == 0 else "No logs available")
+    try:
+        with open('/var/log/elb-ddos-defender/defender.log', 'r') as f:
+            lines = f.readlines()
+            print(''.join(lines[-50:]))
+    except:
+        print("\n❌ No logs available")
     
     print("=" * 80)
     input("\nPress Enter to continue...")
