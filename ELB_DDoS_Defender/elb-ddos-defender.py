@@ -61,10 +61,33 @@ class TrafficMonitor:
                 self.stats['total_bytes'] += packet_size
                 self.bytes_history.append((timestamp, packet_size))
             
-            # IP layer analysis
-            if hasattr(packet, 'ip'):
+            # Check for VXLAN encapsulation (VPC Traffic Mirror)
+            src_ip = None
+            if hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport'):
+                # VXLAN uses UDP port 4789
+                if packet.udp.dstport == '4789':
+                    # This is a mirrored packet - try to get inner IP
+                    if hasattr(packet, 'ip') and packet.highest_layer != 'UDP':
+                        # Look for inner IP layer after VXLAN
+                        try:
+                            # PyShark should decode VXLAN automatically
+                            # The real client IP will be in a nested IP layer
+                            for layer in packet.layers:
+                                if layer.layer_name == 'ip' and hasattr(layer, 'src'):
+                                    # Skip outer IP (10.0.x.x), get inner IP
+                                    potential_ip = layer.src
+                                    if not potential_ip.startswith('10.0.'):
+                                        src_ip = potential_ip
+                                        break
+                        except:
+                            pass
+            
+            # Fallback to outer IP if no inner IP found
+            if not src_ip and hasattr(packet, 'ip'):
                 src_ip = packet.ip.src
-                dst_ip = packet.ip.dst
+            
+            # IP layer analysis
+            if src_ip:
                 self.stats['unique_ips'].add(src_ip)
                 
                 # Track connections per IP
