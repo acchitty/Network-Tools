@@ -81,10 +81,26 @@ class TrafficMonitor:
                 # VXLAN packet: Use INNER IP (last IP layer)
                 # Structure: Outer IP (ALB ENI) → VXLAN → Inner IP (Real Client)
                 inner_ip = ip_layers[-1]  # Last IP layer is the real packet
-                if hasattr(inner_ip, 'src'):
-                    src_ip = inner_ip.src
-                if hasattr(inner_ip, 'dst'):
-                    dst_ip = inner_ip.dst
+                
+                # For mirrored traffic, the direction might be reversed
+                # Check which IP is the real client (not 10.0.x.x)
+                if hasattr(inner_ip, 'src') and hasattr(inner_ip, 'dst'):
+                    inner_src = inner_ip.src
+                    inner_dst = inner_ip.dst
+                    
+                    # If src is 10.0.x.x (defender/ALB), swap them
+                    if inner_src.startswith('10.0.') and not inner_dst.startswith('10.0.'):
+                        # Reversed: dst is actually the real client
+                        src_ip = inner_dst
+                        dst_ip = inner_src
+                    elif not inner_src.startswith('10.0.'):
+                        # Normal: src is the real client
+                        src_ip = inner_src
+                        dst_ip = inner_dst
+                    else:
+                        # Both are 10.0.x.x, skip
+                        src_ip = None
+                        dst_ip = None
             elif len(ip_layers) > 0:
                 # Regular packet: Use first IP layer
                 outer_ip = ip_layers[0]
