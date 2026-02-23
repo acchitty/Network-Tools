@@ -61,47 +61,57 @@ class TrafficMonitor:
                 self.stats['total_bytes'] += packet_size
                 self.bytes_history.append((timestamp, packet_size))
             
-            # Check for VXLAN encapsulation (VPC Traffic Mirror)
+            # Extract real IPs from VXLAN or regular packets
             src_ip = None
             dst_ip = None
             dst_port = None
             
-            if hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport'):
-                # VXLAN uses UDP port 4789
-                if packet.udp.dstport == '4789':
-                    # This is a mirrored packet - try to get inner IP
-                    if hasattr(packet, 'ip') and packet.highest_layer != 'UDP':
-                        # Look for inner IP layer after VXLAN
-                        try:
-                            # PyShark should decode VXLAN automatically
-                            # The real client IP will be in a nested IP layer
-                            for layer in packet.layers:
-                                if layer.layer_name == 'ip' and hasattr(layer, 'src'):
-                                    # Skip outer IP (10.0.x.x), get inner IP
-                                    potential_ip = layer.src
-                                    if not potential_ip.startswith('10.0.'):
-                                        src_ip = potential_ip
-                                        if hasattr(layer, 'dst'):
-                                            dst_ip = layer.dst
-                                        break
-                        except:
-                            pass
+            # Check if this is a VXLAN packet (VPC Traffic Mirror)
+            is_vxlan = False
+            if hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport') and packet.udp.dstport == '4789':
+                is_vxlan = True
             
-            # Fallback to outer IP if no inner IP found
-            if not src_ip and hasattr(packet, 'ip'):
-                src_ip = packet.ip.src
-                if hasattr(packet.ip, 'dst'):
-                    dst_ip = packet.ip.dst
+            # Get all IP layers
+            ip_layers = []
+            for layer in packet.layers:
+                if layer.layer_name == 'ip':
+                    ip_layers.append(layer)
             
-            # Get destination port
+            if is_vxlan and len(ip_layers) >= 2:
+                # VXLAN packet: Use INNER IP (last IP layer)
+                # Structure: Outer IP (ALB ENI) → VXLAN → Inner IP (Real Client)
+                inner_ip = ip_layers[-1]  # Last IP layer is the real packet
+                if hasattr(inner_ip, 'src'):
+                    src_ip = inner_ip.src
+                if hasattr(inner_ip, 'dst'):
+                    dst_ip = inner_ip.dst
+            elif len(ip_layers) > 0:
+                # Regular packet: Use first IP layer
+                outer_ip = ip_layers[0]
+                if hasattr(outer_ip, 'src'):
+                    src_ip = outer_ip.src
+                if hasattr(outer_ip, 'dst'):
+                    dst_ip = outer_ip.dst
+            
+            # Skip if source is ALB ENI (10.0.x.x) - this means VXLAN decode failed
+            if src_ip and src_ip.startswith('10.0.'):
+                # Try to find any non-10.0.x.x IP in the packet
+                for layer in ip_layers:
+                    if hasattr(layer, 'src') and not layer.src.startswith('10.0.'):
+                        src_ip = layer.src
+                        if hasattr(layer, 'dst'):
+                            dst_ip = layer.dst
+                        break
+            
+            # Get destination port from TCP/UDP
             if hasattr(packet, 'tcp') and hasattr(packet.tcp, 'dstport'):
                 dst_port = packet.tcp.dstport
             elif hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport'):
                 if packet.udp.dstport != '4789':  # Skip VXLAN port
                     dst_port = packet.udp.dstport
             
-            # IP layer analysis
-            if src_ip:
+            # Only process if we have a valid source IP (not ALB ENI)
+            if src_ip and not src_ip.startswith('10.0.'):
                 self.stats['unique_ips'].add(src_ip)
                 
                 # Track connections per IP with destination info
