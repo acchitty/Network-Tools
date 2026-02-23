@@ -74,7 +74,7 @@ class TrafficMonitor:
             # ONLY process VXLAN packets (mirrored traffic)
             # Skip defender's own traffic
             if not is_vxlan:
-                continue
+                return
             
             # Get all IP layers
             ip_layers = []
