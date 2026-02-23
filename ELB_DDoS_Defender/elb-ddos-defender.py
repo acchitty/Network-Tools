@@ -63,6 +63,9 @@ class TrafficMonitor:
             
             # Check for VXLAN encapsulation (VPC Traffic Mirror)
             src_ip = None
+            dst_ip = None
+            dst_port = None
+            
             if hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport'):
                 # VXLAN uses UDP port 4789
                 if packet.udp.dstport == '4789':
@@ -78,6 +81,8 @@ class TrafficMonitor:
                                     potential_ip = layer.src
                                     if not potential_ip.startswith('10.0.'):
                                         src_ip = potential_ip
+                                        if hasattr(layer, 'dst'):
+                                            dst_ip = layer.dst
                                         break
                         except:
                             pass
@@ -85,19 +90,35 @@ class TrafficMonitor:
             # Fallback to outer IP if no inner IP found
             if not src_ip and hasattr(packet, 'ip'):
                 src_ip = packet.ip.src
+                if hasattr(packet.ip, 'dst'):
+                    dst_ip = packet.ip.dst
+            
+            # Get destination port
+            if hasattr(packet, 'tcp') and hasattr(packet.tcp, 'dstport'):
+                dst_port = packet.tcp.dstport
+            elif hasattr(packet, 'udp') and hasattr(packet.udp, 'dstport'):
+                if packet.udp.dstport != '4789':  # Skip VXLAN port
+                    dst_port = packet.udp.dstport
             
             # IP layer analysis
             if src_ip:
                 self.stats['unique_ips'].add(src_ip)
                 
-                # Track connections per IP
-                self.connection_tracker[src_ip].append(timestamp)
+                # Track connections per IP with destination info
+                conn_info = {
+                    'timestamp': timestamp,
+                    'dst_ip': dst_ip,
+                    'dst_port': dst_port
+                }
+                self.connection_tracker[src_ip].append(conn_info)
                 
                 # Check for connection flood from single IP
-                recent_conns = [t for t in self.connection_tracker[src_ip] 
-                               if timestamp - t < 1.0]
+                recent_conns = [c for c in self.connection_tracker[src_ip] 
+                               if timestamp - c['timestamp'] < 1.0]
                 if len(recent_conns) > 100:
-                    self.detect_attack('connection_flood', src_ip, len(recent_conns))
+                    # Get destination for attack report
+                    dest = f"{dst_ip}:{dst_port}" if dst_ip and dst_port else "unknown"
+                    self.detect_attack('connection_flood', src_ip, len(recent_conns), dest)
             
             # TCP analysis
             if hasattr(packet, 'tcp'):
@@ -119,16 +140,18 @@ class TrafficMonitor:
         except Exception as e:
             logger.debug(f"Packet analysis error: {e}")
     
-    def detect_attack(self, attack_type, source_ip, metric_value):
+    def detect_attack(self, attack_type, source_ip, metric_value, destination=None):
         """Log detected attack"""
         attack = {
             'type': attack_type,
             'source': source_ip,
+            'destination': destination,
             'value': metric_value,
             'timestamp': datetime.now().isoformat()
         }
         self.stats['attacks_detected'].append(attack)
-        logger.warning(f"⚠️  ATTACK DETECTED: {attack_type} from {source_ip} ({metric_value} conn/sec)")
+        dest_str = f" → {destination}" if destination else ""
+        logger.warning(f"⚠️  ATTACK DETECTED: {attack_type} from {source_ip}{dest_str} ({metric_value} conn/sec)")
     
     def calculate_metrics(self):
         """Calculate real-time metrics"""

@@ -106,7 +106,10 @@ def create_metrics_panel(metrics):
         content_parts.append(Text(""))
         content_parts.append(Text("⚠️  RECENT ATTACKS:", style="bold red"))
         for attack in recent_attacks:
-            content_parts.append(Text(f"  • {attack['type']} from {attack['source']} ({attack['value']} conn/s)"))
+            src = attack['source']
+            dest = attack.get('destination', '')
+            route = f"{src} → {dest}" if dest else src
+            content_parts.append(Text(f"  • {attack['type']} from {route} ({attack['value']} conn/s)"))
     else:
         content_parts.append(Text(""))
         content_parts.append(Text("✓ No attacks detected", style="green"))
@@ -167,6 +170,7 @@ def create_dashboard():
     menu.add_row("4", "View Configuration")
     menu.add_row("5", "Restart Service")
     menu.add_row("6", "Setup VPC Traffic Mirroring")
+    menu.add_row("7", "Investigate Attacking IP (WHOIS/MTR)")
     menu.add_row("R", "Refresh Dashboard")
     menu.add_row("Q", "Quit")
     
@@ -597,6 +601,131 @@ def setup_traffic_mirroring():
     console.print("\n[dim]Press Enter to continue...[/dim]")
     input()
 
+def investigate_ip():
+    """Investigate an attacking IP with WHOIS and MTR"""
+    console.clear()
+    console.print("[bold cyan]🔍 IP Investigation Tool[/bold cyan]\n")
+    
+    # Load recent attacks
+    metrics = load_metrics()
+    attacks = metrics.get('attacks_detected', [])
+    
+    if not attacks:
+        console.print("[yellow]No attacks detected yet.[/yellow]")
+        console.print("\n[dim]Press Enter to continue...[/dim]")
+        input()
+        return
+    
+    # Show recent attacking IPs
+    console.print("[bold]Recent Attacking IPs:[/bold]\n")
+    unique_ips = {}
+    for attack in attacks[-20:]:  # Last 20 attacks
+        src = attack.get('source', 'unknown')
+        if src != 'unknown' and src != 'multiple_sources':
+            if src not in unique_ips:
+                unique_ips[src] = {
+                    'count': 0,
+                    'type': attack.get('type'),
+                    'dest': attack.get('destination', 'N/A')
+                }
+            unique_ips[src]['count'] += 1
+    
+    if not unique_ips:
+        console.print("[yellow]No specific IPs found in recent attacks.[/yellow]")
+        console.print("\n[dim]Press Enter to continue...[/dim]")
+        input()
+        return
+    
+    # Display IPs
+    ip_table = Table(box=box.ROUNDED)
+    ip_table.add_column("#", style="cyan")
+    ip_table.add_column("IP Address", style="yellow")
+    ip_table.add_column("Attack Type", style="red")
+    ip_table.add_column("Count", style="magenta")
+    ip_table.add_column("Target", style="blue")
+    
+    ip_list = list(unique_ips.items())
+    for idx, (ip, info) in enumerate(ip_list, 1):
+        ip_table.add_row(str(idx), ip, info['type'], str(info['count']), info['dest'])
+    
+    console.print(ip_table)
+    console.print()
+    
+    # Prompt for IP selection
+    choice = Prompt.ask("[bold]Enter IP number to investigate (or 'b' to go back)[/bold]")
+    
+    if choice.lower() == 'b':
+        return
+    
+    try:
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(ip_list):
+            console.print("[red]Invalid selection[/red]")
+            time.sleep(2)
+            return
+        
+        target_ip = ip_list[idx][0]
+        console.clear()
+        console.print(f"[bold cyan]🔍 Investigating {target_ip}[/bold cyan]\n")
+        
+        # WHOIS Lookup
+        console.print("[bold yellow]═══ WHOIS Information ═══[/bold yellow]\n")
+        try:
+            result = subprocess.run(['whois', target_ip], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                # Parse key info
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if any(keyword in line.lower() for keyword in ['netname', 'orgname', 'country', 'descr', 'owner', 'inetnum', 'cidr']):
+                        console.print(f"  {line.strip()}")
+            else:
+                console.print("[red]WHOIS lookup failed[/red]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]WHOIS lookup timed out[/red]")
+        except FileNotFoundError:
+            console.print("[red]whois command not found (install with: yum install whois)[/red]")
+        
+        console.print()
+        
+        # MTR (My Traceroute)
+        console.print("[bold yellow]═══ Network Route (MTR) ═══[/bold yellow]\n")
+        console.print("[dim]Running traceroute (this may take 10-15 seconds)...[/dim]\n")
+        try:
+            result = subprocess.run(['mtr', '-r', '-c', '5', '-n', target_ip], 
+                                   capture_output=True, text=True, timeout=20)
+            if result.returncode == 0:
+                console.print(result.stdout)
+            else:
+                console.print("[red]MTR failed[/red]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]MTR timed out[/red]")
+        except FileNotFoundError:
+            console.print("[red]mtr command not found (install with: yum install mtr)[/red]")
+        
+        console.print()
+        
+        # DNS Reverse Lookup
+        console.print("[bold yellow]═══ Reverse DNS ═══[/bold yellow]\n")
+        try:
+            result = subprocess.run(['dig', '+short', '-x', target_ip], 
+                                   capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip():
+                console.print(f"  Hostname: {result.stdout.strip()}")
+            else:
+                console.print("  [dim]No reverse DNS record found[/dim]")
+        except:
+            console.print("  [dim]DNS lookup unavailable[/dim]")
+        
+    except ValueError:
+        console.print("[red]Invalid input[/red]")
+        time.sleep(2)
+        return
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+    
+    console.print("\n[dim]Press Enter to continue...[/dim]")
+    input()
+
 def main():
     """Main dashboard loop"""
     while True:
@@ -605,7 +734,7 @@ def main():
         console.print(layout)
         
         choice = Prompt.ask("[bold cyan]Select option[/bold cyan]", 
-                           choices=["1", "2", "3", "4", "5", "6", "r", "R", "q", "Q"],
+                           choices=["1", "2", "3", "4", "5", "6", "7", "r", "R", "q", "Q"],
                            default="r")
         
         if choice in ["q", "Q"]:
@@ -624,6 +753,8 @@ def main():
             restart_service()
         elif choice == "6":
             setup_traffic_mirroring()
+        elif choice == "7":
+            investigate_ip()
         elif choice in ["r", "R"]:
             continue
 
