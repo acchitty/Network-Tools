@@ -127,7 +127,7 @@ def update_dashboard(layout):
     
     layout["menu"].update(
         Panel(
-            "MENU: [1] Setup ELB  [2] View ELBs  [3] VPC Status  [4] Logs  [5] Attacks  [6] Report  [7] Exit",
+            "Press Ctrl+C to stop and access menu",
             style="bold yellow"
         )
     )
