@@ -111,7 +111,13 @@ class TrafficMonitor:
                     dst_port = packet.udp.dstport
             
             # Only process if we have a valid source IP (not ALB ENI)
-            if src_ip and not src_ip.startswith('10.0.'):
+            if src_ip:
+                # Debug: Log what IPs we're seeing
+                if src_ip.startswith('10.0.'):
+                    logger.debug(f"Skipping ALB ENI IP: {src_ip}")
+                else:
+                    logger.info(f"Real client IP detected: {src_ip} → {dst_ip}:{dst_port}")
+                    
                 self.stats['unique_ips'].add(src_ip)
                 
                 # Track connections per IP with destination info
@@ -122,12 +128,13 @@ class TrafficMonitor:
                 }
                 self.connection_tracker[src_ip].append(conn_info)
                 
-                # Check for connection flood from single IP
-                recent_conns = [c for c in self.connection_tracker[src_ip] 
-                               if timestamp - c['timestamp'] < 1.0]
-                if len(recent_conns) > 100:
-                    # Get destination for attack report
-                    dest = f"{dst_ip}:{dst_port}" if dst_ip and dst_port else "unknown"
+                # Check for connection flood from single IP (skip 10.0.x.x)
+                if not src_ip.startswith('10.0.'):
+                    recent_conns = [c for c in self.connection_tracker[src_ip] 
+                                   if timestamp - c['timestamp'] < 1.0]
+                    if len(recent_conns) > 100:
+                        # Get destination for attack report
+                        dest = f"{dst_ip}:{dst_port}" if dst_ip and dst_port else "unknown"
                     self.detect_attack('connection_flood', src_ip, len(recent_conns), dest)
             
             # TCP analysis
