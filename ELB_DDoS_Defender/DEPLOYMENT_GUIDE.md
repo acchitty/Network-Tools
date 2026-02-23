@@ -1,14 +1,23 @@
 # ELB DDoS Defender - Complete Deployment Guide
 
-**Version 2.0 - Real-time Traffic Monitoring**
+**Version 2.1 - Web Dashboard with Live Charts**
 
-## What's New in v2.0 ✨
+## What's New in v2.1 ✨
+- 🌐 **Web Dashboard** - Access from any browser with live charts
+- 📊 **Real-time graphs** - Packet rate visualization (last 60 seconds)
+- 🔍 **Click-to-investigate** - WHOIS lookup for attacking IPs
+- 📈 **Top 10 attackers** - Ranked table with attack counts
+- ⚡ **Auto-refresh** - Updates every 5 seconds automatically
+- 🎨 **Beautiful UI** - Dark theme with gradient backgrounds
+
+## Previous Features (v2.0)
 - ✅ **Real-time traffic monitoring** with packet capture
 - ✅ **Live metrics dashboard** with visual meters and graphs
-- ✅ **Attack detection** (connection floods, DDoS patterns)
+- ✅ **Attack detection** (6 types: SYN flood, UDP flood, connection flood, etc.)
 - ✅ **Interactive ELB selection** from dashboard
-- ✅ **Simulation mode** for testing without VPC Traffic Mirroring
-- ✅ **Metrics export** (JSON file updated every second)
+- ✅ **VPC Traffic Mirroring** integration
+- ✅ **Terminal dashboard** with Rich UI
+- ✅ **WHOIS/MTR** IP investigation tool
 
 ## 🚀 Quick Start (5 Minutes)
 
@@ -34,6 +43,7 @@ cd cloudformation/ && ./setup.sh
 - ✅ Resource discovery and listing
 - ✅ Configuration validation
 - ✅ Automatic deployment
+- 🌐 **Web dashboard on port 5000**
 
 **See all options:** `DEPLOYMENT_OPTIONS.md`
 
@@ -48,6 +58,7 @@ cd cloudformation/ && ./setup.sh
    - [Method C: CloudFormation](#method-c-cloudformation)
    - [Method D: Terraform](#method-d-terraform)
 3. [Configuration](#configuration)
+4. [Web Dashboard Access](#web-dashboard-access)
 4. [Verification](#verification)
 5. [Usage](#usage)
 6. [Troubleshooting](#troubleshooting)
@@ -906,6 +917,7 @@ sudo systemctl restart elb-ddos-defender
 cd /opt/Network-Tools/ELB_DDoS_Defender
 sudo git pull
 sudo systemctl restart elb-ddos-defender
+sudo systemctl restart elb-ddos-web
 ```
 
 ### Q: Can I customize detection rules?
@@ -915,6 +927,86 @@ sudo systemctl restart elb-ddos-defender
 ### Q: Does it integrate with AWS Shield?
 
 **A:** Yes! Works alongside AWS Shield for enhanced protection.
+
+### Q: How do I access the web dashboard?
+
+**A:** Open your browser to `http://<instance-public-ip>:5000`. Make sure port 5000 is open in your security group.
+
+---
+
+## 🌐 Web Dashboard Access
+
+### Accessing the Dashboard
+
+**URL Format:**
+```
+http://<defender-instance-public-ip>:5000
+```
+
+**Example:**
+```
+http://44.195.67.223:5000
+```
+
+### Features
+
+**Live Metrics (Auto-refresh every 5s):**
+- 📊 Total packets, packets/sec, connections/sec
+- 📈 Unique IPs, SYN/UDP packet counts
+- 💾 Total bytes transferred
+- ⚠️ Attacks detected count
+
+**Real-time Graph:**
+- 📉 Packet rate over last 60 seconds
+- Live updating line chart
+
+**Recent Attacks Feed:**
+- ⚠️ Last 10 attacks with timestamps
+- Shows attack type, source → destination
+- Connection rate for each attack
+
+**Top 10 Attackers Table:**
+- 🎯 Ranked by attack count
+- Shows IP, attack types, target, last seen
+- Click any IP for WHOIS lookup
+
+**WHOIS Investigation:**
+- 🔍 Click any IP to investigate
+- Shows organization, country, network info
+- Full WHOIS data in modal popup
+
+### Security Group Configuration
+
+**Open port 5000:**
+```bash
+aws ec2 authorize-security-group-ingress \
+  --group-id <your-sg-id> \
+  --protocol tcp \
+  --port 5000 \
+  --cidr <your-ip>/32  # Restrict to your IP only
+```
+
+**For public access (not recommended):**
+```bash
+--cidr 0.0.0.0/0
+```
+
+### Service Management
+
+**Check web dashboard status:**
+```bash
+sudo systemctl status elb-ddos-web
+```
+
+**Restart web dashboard:**
+```bash
+sudo systemctl restart elb-ddos-web
+```
+
+**View web dashboard logs:**
+```bash
+sudo journalctl -u elb-ddos-web -f
+```
 
 ---
 
@@ -941,15 +1033,16 @@ sudo systemctl restart elb-ddos-defender
 After installation:
 
 1. ✅ **Verify monitoring** - Check dashboard and logs
-2. ✅ **Test alerts** - Run test-alert.sh
-3. ✅ **Review thresholds** - Adjust for your traffic
-4. ✅ **Set up VPC Traffic Mirroring** - See setup guide
-5. ✅ **Configure auto-response** (optional)
-6. ✅ **Schedule regular reports**
+2. ✅ **Access web dashboard** - Open http://<instance-ip>:5000
+3. ✅ **Test alerts** - Run test-alert.sh
+4. ✅ **Review thresholds** - Adjust for your traffic
+5. ✅ **Set up VPC Traffic Mirroring** - See setup guide
+6. ✅ **Configure auto-response** (optional)
+7. ✅ **Schedule regular reports**
 
 **You're now protected against DDoS attacks!** 🛡️
 
 ---
 
 *Last updated: 2026-02-22*
-*Version: 2.0*
+*Version: 2.1 - Web Dashboard*
